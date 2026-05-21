@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from "react";
 
 // ─── MEALS ────────────────────────────────────────────────────────────────────
 const MEALS = [
-  { id:"cafe",    label:"Cafe da Manha",   icon:"☕", time:"07:00", cooked:false },
+  { id:"cafe",    label:"Cafxe da Manha",   icon:"☕", time:"07:00", cooked:false },
   { id:"lanche1", label:"Lanche da Manha", icon:"🍎", time:"10:00", cooked:false },
   { id:"almoco",  label:"Almoco",           icon:"🍽️", time:"12:30", cooked:true  },
   { id:"lanche2", label:"Lanche da Tarde",  icon:"🍊", time:"16:00", cooked:false },
