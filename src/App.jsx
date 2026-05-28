@@ -17,7 +17,7 @@ const USER_DOC = "usuarios/ivan"; // documento único do usuário
 
 // ─── MEALS ────────────────────────────────────────────────────────────────────
 const MEALS = [
-  { id:"cafe",    label:"Cadfe da Manha",   icon:"☕", time:"07:00", cooked:false },
+  { id:"cafe",    label:"Cafe da Manha",   icon:"☕", time:"07:00", cooked:false },
   { id:"lanche1", label:"Lanche da Manha", icon:"🍎", time:"10:00", cooked:false },
   { id:"almoco",  label:"Almoco",           icon:"🍽️", time:"12:30", cooked:true  },
   { id:"lanche2", label:"Lanche da Tarde",  icon:"🍊", time:"16:00", cooked:false },
@@ -322,6 +322,17 @@ function getEffectivePrice(food, customPrices) {
   if(customPrices && customPrices[food.id] !== undefined) return customPrices[food.id];
   return food.price || 0;
 }
+
+// Resolve macro for a menu item (handles both FOODS and custom foods)
+function resolveMacro(item, customFoodsList) {
+  if(!item.isCustom) {
+    const food = FOODS.find(f=>f.id===item.foodId);
+    return food?.macro || null;
+  }
+  // Custom food — look up macro in customFoodsList
+  const cf = (customFoodsList||[]).find(x=>x.name===item.name);
+  return cf?.macro || null;
+}
 function calcPrice(food, grams, customPrices) {
   const p = getEffectivePrice(food, customPrices);
   if(!p) return null;
@@ -538,21 +549,28 @@ export default function DietaTracker() {
   function removeItem(id){setCurrentMenu(prev=>prev.filter(i=>i.id!==id));}
 
   function addCustomFood(cf) {
-    const { name, calPer100, grams, mealId, obs, measures } = cf;
+    const { name, calPer100, grams, mealId, obs, measures, macroP, macroC, macroF } = cf;
     const c100 = parseFloat(calPer100);
     if (!name.trim() || !c100 || c100<1) return;
 
-    // Build clean measures list — user-defined + fallback
+    // Build macro object if any values provided
+    const macro = (macroP||macroC||macroF) ? {
+      p: parseFloat(macroP)||0,
+      c: parseFloat(macroC)||0,
+      f: parseFloat(macroF)||0,
+      fi:0, su:0, na:0, k:0, ch:0,
+    } : null;
+
     const userMeasures = (measures||[]).filter(m=>m.label.trim()&&m.g>0);
     const saveMeasures = userMeasures.length > 0 ? userMeasures : [{label:"100g", g:100}];
 
-    // Save to custom foods library (update if same name exists)
     const existing = customFoodsList.find(f=>f.name.trim().toLowerCase()===name.trim().toLowerCase());
     const newFood = {
       id: existing ? existing.id : `custom_${Date.now()}`,
       name: name.trim(), calPer100: c100,
       obs: (obs||"").trim(),
       measures: saveMeasures,
+      macro,
       group:"Personalizado", color:"#B8B8B8",
       createdAt: existing ? existing.createdAt : new Date().toISOString(),
     };
@@ -825,10 +843,17 @@ RESPONDA SOMENTE JSON VALIDO:
             {MEALS.map(meal=>{
               const items=currentMenu.filter(i=>i.mealId===meal.id);const mcal=mealCals[meal.id];const open=expanded[meal.id];
               const mealCost=items.reduce((s,item)=>{
+                const qty=item.qty||1;
+                if(item.isCustom){
+                  // preço do alimento personalizado vem do customFoodsList
+                  const cf=customFoodsList.find(x=>x.name===item.name);
+                  const p=cf?.price||0;
+                  return s+p*item.grams*qty/100;
+                }
                 const food=FOODS.find(f=>f.id===item.foodId);
                 if(!food) return s;
                 const p=getEffectivePrice(food,customPrices);
-                return s+p*item.grams*(item.qty||1)/100;
+                return s+p*item.grams*qty/100;
               },0);
               return(
                 <div key={meal.id} className="card" style={{overflow:"hidden"}}>
@@ -845,7 +870,7 @@ RESPONDA SOMENTE JSON VALIDO:
                     {/* Pie chart + cost for all meals with items */}
                     {items.length>0 && (
                       <div onClick={()=>setExpanded(p=>({...p,[meal.id]:!p[meal.id]}))} style={{cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                        <MealPieChart items={items}/>
+                        <MealPieChart items={items} customFoodsList={customFoodsList}/>
                         {mealCost>0&&<span style={{fontSize:10,fontWeight:700,color:"#286028",whiteSpace:"nowrap"}}>💰 {fmtPrice(mealCost)}</span>}
                       </div>
                     )}
@@ -901,7 +926,7 @@ RESPONDA SOMENTE JSON VALIDO:
                             )}
                           </div>
                         );})}
-                      {items.length>0 && <MacroTotalsRow items={items}/>}
+                      {items.length>0 && <MacroTotalsRow items={items} customFoodsList={customFoodsList}/>}
                     </div>
                   )}
                 </div>
@@ -916,11 +941,17 @@ RESPONDA SOMENTE JSON VALIDO:
                 </div>
                 {(()=>{
                   const totalCost=menu.reduce((s,item)=>{
+                    const qty=item.qty||1;
+                    if(item.isCustom){
+                      const cf=customFoodsList.find(x=>x.name===item.name);
+                      const p=cf?.price||0;
+                      return s+p*item.grams*qty/100;
+                    }
                     const food=FOODS.find(f=>f.id===item.foodId);
                     if(!food) return s;
                     const p=getEffectivePrice(food,customPrices);
                     if(!p) return s;
-                    return s+p*item.grams*(item.qty||1)/100;
+                    return s+p*item.grams*qty/100;
                   },0);
                   return totalCost>0&&(
                     <div style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"6px 12px",marginBottom:10,display:"inline-flex",alignItems:"center",gap:6}}>
@@ -940,7 +971,7 @@ RESPONDA SOMENTE JSON VALIDO:
                 </div>
               </div>
             )}
-            {currentMenu.length>0&&<NutrientAnalysis menu={currentMenu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+currentProfile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")}/>}
+            {currentMenu.length>0&&<NutrientAnalysis menu={currentMenu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+currentProfile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")} customFoodsList={customFoodsList}/>}
           </div>
         )}
 
@@ -999,6 +1030,9 @@ RESPONDA SOMENTE JSON VALIDO:
                           name:cf.name, calPer100:String(cf.calPer100),
                           obs:cf.obs||"", grams:"", mealId:targetMeal,
                           measures:[...(cf.measures||[])],
+                          macroP: cf.macro?.p||"",
+                          macroC: cf.macro?.c||"",
+                          macroF: cf.macro?.f||"",
                           _editId:cf.id
                         })}
                         style={{background:"#EDE5D8",color:"#5C3018",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600}}>✏️</button>
@@ -1322,6 +1356,7 @@ RESPONDA SOMENTE JSON VALIDO:
             menu={currentMenu} history={history} dailyGoal={dailyGoal}
             profile={currentProfile} weight={+currentProfile.weight||0}
             saveDay={saveDay} todayKey={todayKey}
+            customFoodsList={customFoodsList}
           />
         )}
 
@@ -1487,7 +1522,37 @@ RESPONDA SOMENTE JSON VALIDO:
               value={customFood.calPer100}
               onChange={e=>setCustomFood(p=>({...p,calPer100:e.target.value}))}/>
 
-            {/* Observação */}
+            {/* Macronutrientes */}
+            <label className="lbl" style={{marginTop:12}}>Macronutrientes por 100g <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
+            <p style={{fontSize:11,color:"#A89878",marginBottom:8}}>Se informar, os macros serão somados no cardápio e nos relatórios.</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:4}}>
+              {[
+                {key:"macroP", label:"Proteína (g)", color:"#C97B5A", placeholder:"Ex: 25"},
+                {key:"macroC", label:"Carb. (g)",    color:"#C8A840", placeholder:"Ex: 40"},
+                {key:"macroF", label:"Gordura (g)",  color:"#4A8050", placeholder:"Ex: 8"},
+              ].map(({key,label,color,placeholder})=>(
+                <div key={key}>
+                  <p style={{fontSize:10,fontWeight:700,color,marginBottom:4}}>{label}</p>
+                  <input className="inp" type="number" min="0" max="500" placeholder={placeholder}
+                    value={customFood[key]||""}
+                    onChange={e=>setCustomFood(p=>({...p,[key]:e.target.value}))}
+                    style={{padding:"8px 10px",fontSize:13}}/>
+                </div>
+              ))}
+            </div>
+            {/* Macro preview */}
+            {(customFood.macroP||customFood.macroC||customFood.macroF)&&(
+              <div style={{background:"#F5EFE6",borderRadius:8,padding:"7px 12px",marginBottom:4,display:"flex",gap:12,flexWrap:"wrap"}}>
+                {customFood.macroP&&<span style={{fontSize:11,color:"#C97B5A",fontWeight:700}}>P: {customFood.macroP}g</span>}
+                {customFood.macroC&&<span style={{fontSize:11,color:"#C8A840",fontWeight:700}}>C: {customFood.macroC}g</span>}
+                {customFood.macroF&&<span style={{fontSize:11,color:"#4A8050",fontWeight:700}}>G: {customFood.macroF}g</span>}
+                <span style={{fontSize:11,color:"#8B7050"}}>
+                  = {Math.round(((+customFood.macroP||0)*4)+((+customFood.macroC||0)*4)+((+customFood.macroF||0)*9))} kcal calculados
+                  {customFood.calPer100&&Math.abs(Math.round(((+customFood.macroP||0)*4)+((+customFood.macroC||0)*4)+((+customFood.macroF||0)*9))-parseFloat(customFood.calPer100))>10&&
+                    <span style={{color:"#E8A030"}}> ⚠️ difere do valor informado</span>}
+                </span>
+              </div>
+            )}
             <label className="lbl">Observação <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
             <input className="inp" placeholder="Ex: receita da vovó, sem glúten, marca X..."
               value={customFood.obs||""}
@@ -1568,16 +1633,14 @@ RESPONDA SOMENTE JSON VALIDO:
 }
 
 // ── RelatórioTab ─────────────────────────────────────────────────────────────
-function calcNutrientsForMenu(menuItems) {
+function calcNutrientsForMenu(menuItems, customFoodsList) {
   let cal=0,p=0,c=0,f=0,fi=0,su=0,na=0,k=0,ch=0;
   menuItems.forEach(item => {
     const q = item.qty||1;
-    if(item.isCustom){ cal+=item.cal*q; return; }
-    const food = FOODS.find(fd=>fd.id===item.foodId);
-    if(!food) { cal+=item.cal*q; return; }
-    const g = item.grams*q;
-    const m = food.macro||{};
     cal += item.cal*q;
+    const m = resolveMacro(item, customFoodsList)||{};
+    if(!m.p && !m.c && !m.f) return;
+    const g = item.grams*q;
     p   += (m.p||0)*g/100;
     c   += (m.c||0)*g/100;
     f   += (m.f||0)*g/100;
@@ -1590,7 +1653,7 @@ function calcNutrientsForMenu(menuItems) {
   return {cal:Math.round(cal),p:Math.round(p),c:Math.round(c),f:Math.round(f),fi:Math.round(fi),su:Math.round(su),na:Math.round(na),k:Math.round(k),ch:Math.round(ch)};
 }
 
-function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey }) {
+function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey, customFoodsList }) {
   const [subTab, setSubTab] = useState("calorias");
   const [sortCol, setSortCol] = useState(null);  // null | "name"|"cal"|"p"|"c"|"f"|"fi"|"su"|"ch"|"na"|"k"
   const [sortDir, setSortDir] = useState(1);     // 1=asc, -1=desc
@@ -1642,7 +1705,7 @@ function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, tod
   const todayIso = todayKey();
   const getMenuForDay = (iso) => iso===todayIso ? menu : (history[iso]?.menu||[]);
   const dayData = days.map(iso => ({
-    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso)),
+    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso), customFoodsList),
     isToday: iso===todayIso
   }));
 
@@ -3268,23 +3331,28 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
 }
 
 // ── MacroTotalsRow ────────────────────────────────────────────────────────────
-function MacroTotalsRow({ items }) {
-  let tP=0,tC=0,tF=0;
+function MacroTotalsRow({ items, customFoodsList }) {
+  let tP=0,tC=0,tF=0,tCalCustom=0;
   items.forEach(it=>{
-    const fd=FOODS.find(f=>f.id===it.foodId);
-    if(!fd||!fd.macro) return;
     const q=it.qty||1;
-    tP+=fd.macro.p*it.grams/100*q;
-    tC+=fd.macro.c*it.grams/100*q;
-    tF+=fd.macro.f*it.grams/100*q;
+    const macro=resolveMacro(it,customFoodsList);
+    if(!macro){ if(it.isCustom) tCalCustom+=it.cal*q; return; }
+    tP+=macro.p*it.grams/100*q;
+    tC+=macro.c*it.grams/100*q;
+    tF+=macro.f*it.grams/100*q;
   });
-  if(tP+tC+tF<1) return null;
+  const hasMacros = tP+tC+tF>=1;
+  const hasCustom = tCalCustom>0;
+  if(!hasMacros && !hasCustom) return null;
   return(
-    <div style={{display:"flex",gap:8,padding:"7px 4px 2px",borderTop:"1px solid #EDE5D8",marginTop:2}}>
+    <div style={{display:"flex",gap:8,padding:"7px 4px 2px",borderTop:"1px solid #EDE5D8",marginTop:2,flexWrap:"wrap"}}>
       <span style={{fontSize:10,color:"#8B7050",fontWeight:600}}>Macros:</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#C97B5A"}}>Prot. {Math.round(tP)}g</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#A08040"}}>Carb. {Math.round(tC)}g</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#4A8050"}}>Gord. {Math.round(tF)}g</span>
+      {hasMacros&&<>
+        <span style={{fontSize:10,fontWeight:700,color:"#C97B5A"}}>Prot. {Math.round(tP)}g</span>
+        <span style={{fontSize:10,fontWeight:700,color:"#A08040"}}>Carb. {Math.round(tC)}g</span>
+        <span style={{fontSize:10,fontWeight:700,color:"#4A8050"}}>Gord. {Math.round(tF)}g</span>
+      </>}
+      {hasCustom&&<span style={{fontSize:10,fontWeight:700,color:"#8B7050"}}>+{tCalCustom} kcal (personalizados s/ macro)</span>}
     </div>
   );
 }
@@ -3385,18 +3453,33 @@ function SubstituicoesContent({ subTarget, subResults, subMode, setSubMode, subS
 }
 
 // ── Meal Macro Pie Chart ──────────────────────────────────────────────────────
-function MealPieChart({ items }) {
-  let totP=0, totC=0, totF=0;
+function MealPieChart({ items, customFoodsList }) {
+  let totP=0, totC=0, totF=0, totCalCustom=0;
   items.forEach(item=>{
-    const food=FOODS.find(f=>f.id===item.foodId);
-    if(!food||!food.macro) return;
-    const q=item.qty||1, g=item.grams;
-    totP += food.macro.p * g/100 * q;
-    totC += food.macro.c * g/100 * q;
-    totF += food.macro.f * g/100 * q;
+    const q=item.qty||1;
+    const macro=resolveMacro(item,customFoodsList);
+    if(!macro){ if(item.isCustom) totCalCustom+=item.cal*q; return; }
+    const g=item.grams;
+    totP += macro.p * g/100 * q;
+    totC += macro.c * g/100 * q;
+    totF += macro.f * g/100 * q;
   });
   const total = totP+totC+totF;
-  if(total<1) return null;
+  // If only custom foods (no macro data), show a simple kcal badge
+  if(total<1) {
+    if(totCalCustom<1) return null;
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+        <div style={{width:36,height:36,borderRadius:"50%",background:"#EDE5D8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#8B7050",textAlign:"center",lineHeight:1.2}}>
+          ✏️
+        </div>
+        <div style={{fontSize:9,lineHeight:1.5}}>
+          <div style={{color:"#8B7050",fontWeight:700}}>{totCalCustom}</div>
+          <div style={{color:"#A89878"}}>kcal</div>
+        </div>
+      </div>
+    );
+  }
   const pP=totP/total, pC=totC/total, pF=totF/total;
   const size=44, r=18, cx=22, cy=22;
   function slice(pct, start) {
@@ -3426,18 +3509,18 @@ function MealPieChart({ items }) {
 }
 
 // ── Nutrient Analysis Component ───────────────────────────────────────────────
-function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos }) {
+function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos, customFoodsList }) {
   const groupsPresent = new Set(menu.map(i => i.group));
 
   // Calculate total macros consumed
   let totalProteinG=0, totalCarbG=0, totalFatG=0;
   menu.forEach(item => {
-    const food = FOODS.find(f => f.id === item.foodId);
-    if (!food || !food.macro) return;
+    const macro = resolveMacro(item, customFoodsList);
+    if (!macro) return;
     const q = item.qty||1, g = item.grams;
-    totalProteinG += food.macro.p * g/100 * q;
-    totalCarbG    += food.macro.c * g/100 * q;
-    totalFatG     += food.macro.f * g/100 * q;
+    totalProteinG += macro.p * g/100 * q;
+    totalCarbG    += macro.c * g/100 * q;
+    totalFatG     += macro.f * g/100 * q;
   });
   totalProteinG = Math.round(totalProteinG);
   totalCarbG    = Math.round(totalCarbG);
