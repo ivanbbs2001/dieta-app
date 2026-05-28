@@ -1002,7 +1002,7 @@ RESPONDA SOMENTE JSON VALIDO:
               {groups.map(g=>(<button key={g} className={`pill ${selGroup===g?"on":""}`} onClick={()=>setSelGroup(g)}>{g!=="Todos"?GROUP_ICONS[g]:"✦"} {g}</button>))}
             </div>
             {/* Custom food button */}
-            <button className="btn" onClick={()=>setCustomFood({name:"",calPer100:"",grams:"",mealId:targetMeal})}
+            <button className="btn" onClick={()=>setCustomFood({name:"",calPer100:"",grams:"",mealId:targetMeal,obs:"",measures:[],macroP:"",macroC:"",macroF:""})}
               style={{width:"100%",background:"linear-gradient(135deg,#2C1A0E,#5C3018)",color:"#F5E8D0",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,marginBottom:12,textAlign:"left"}}>
               <span style={{fontSize:24}}>✏️</span>
               <div>
