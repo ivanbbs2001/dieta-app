@@ -1,8 +1,23 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+
+// ─── FIREBASE ────────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyB86cqlkNfwH530-UPTaj-10iRT8sT0Wr0",
+  authDomain: "dieta-178c7.firebaseapp.com",
+  projectId: "dieta-178c7",
+  storageBucket: "dieta-178c7.firebasestorage.app",
+  messagingSenderId: "722922557292",
+  appId: "1:722922557292:web:cd2437ec1626d792e6ad49",
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const USER_DOC = "usuarios/ivan"; // documento único do usuário
 
 // ─── MEALS ────────────────────────────────────────────────────────────────────
 const MEALS = [
-  { id:"cafe",    label:"Cafxe da Manha",   icon:"☕", time:"07:00", cooked:false },
+  { id:"cafe",    label:"Cafe da Manha",   icon:"☕", time:"07:00", cooked:false },
   { id:"lanche1", label:"Lanche da Manha", icon:"🍎", time:"10:00", cooked:false },
   { id:"almoco",  label:"Almoco",           icon:"🍽️", time:"12:30", cooked:true  },
   { id:"lanche2", label:"Lanche da Tarde",  icon:"🍊", time:"16:00", cooked:false },
@@ -69,11 +84,11 @@ const FOODS = [
   { id:58, name:"Leite semidesnatado",      rawCal:47,  cookedCal:47,  group:"Laticinios", color:"#E0EEF8", price:0.550, priceDesc:"litro~R$5,49/Irani Laticinios", macro:{p:3.3,c:4.9,f:1.5,fi:0,su:4.9,na:46,k:155,ch:7},
     measures:[{label:"1/2 copo (100ml)",g:100},{label:"1 copo (200ml)",g:200}]},
   { id:59, name:"Queijo mussarela",         rawCal:280, cookedCal:280, group:"Laticinios", color:"#F8F0D8", price:7.000, priceDesc:"kg~R$39,98/Irani Frios", macro:{p:22,c:2,f:20,fi:0,su:1,na:627,k:76,ch:60},
-    measures:[{label:"1 fatia (20g)",g:20},{label:"2 fatias (40g)",g:40},{label:"3 fatias (60g)",g:60}]},
+    measures:[{label:"1 fatia fina (20g)",g:20},{label:"2 fatias (40g)",g:40},{label:"3 fatias (60g)",g:60}]},
   { id:60, name:"Requeijao light",          rawCal:170, cookedCal:170, group:"Laticinios", color:"#F5ECE0", price:4.990, priceDesc:"copo 200g~R$9,98/Irani Frios", macro:{p:8,c:4,f:12,fi:0,su:3,na:290,k:110,ch:35},
-    measures:[{label:"1 col. sopa (25g)",g:25},{label:"2 col. sopa (50g)",g:50}]},
+    measures:[{label:"Para 1 fatia de pao (20g)",g:20},{label:"1 col. sopa cheia (25g)",g:25},{label:"2 col. sopa (50g)",g:50}]},
   { id:80, name:"Requeijao cremoso normal", rawCal:240, cookedCal:240, group:"Laticinios", color:"#F0E0C0", price:4.990, priceDesc:"copo 200g~R$9,98/Irani Frios", macro:{p:7,c:4,f:20,fi:0,su:3,na:340,k:100,ch:60},
-    measures:[{label:"1 col. sopa (25g)",g:25},{label:"2 col. sopa (50g)",g:50}]},
+    measures:[{label:"Para 1 fatia de pao (20g)",g:20},{label:"1 col. sopa cheia (25g)",g:25},{label:"2 col. sopa (50g)",g:50}]},
   { id:81, name:"Cafe puro (sem acucar)",   rawCal:2,   cookedCal:2,   group:"Bebida",     color:"#6B3A1F", price:0.050, priceDesc:"pacote 500g~R$13,00/Mercearia", macro:{p:0.1,c:0,f:0,fi:0,su:0,na:2,k:49,ch:0},
     measures:[{label:"Xicara pequena (50ml)",g:50},{label:"Xicara media (100ml)",g:100},{label:"Caneco (200ml)",g:200}]},
   { id:82, name:"Cafe com leite integral",  rawCal:42,  cookedCal:42,  group:"Bebida",     color:"#9C6840", price:0.600, priceDesc:"litro~R$5,99/Irani Laticinios", macro:{p:1.6,c:2.4,f:1.7,fi:0,su:2.4,na:22,k:75,ch:5},
@@ -264,6 +279,34 @@ const FOODS = [
     measures:[{label:"Caixinha 200ml",g:200}]},
   { id:127,name:"Queijo branco frescal",    rawCal:173, cookedCal:173, group:"Laticinios",  color:"#F0F0E0", price:5.770, priceDesc:"pct 300g~R$17,30/Irani Frios", macro:{p:13,c:2,f:13,fi:0,su:0.5,na:290,k:80,ch:43},
     measures:[{label:"1 fatia (30g)",g:30},{label:"2 fatias (60g)",g:60}]},
+
+  // ── Hambúrgueres caseiros (cru moldado) ──
+  // Preparados na AIRFRYER: ar quente circulante, gordura escorre menos que na churrasqueira
+  // pois a carne fica no cesto (reabsorve parte da gordura). Perda de água ~15-18%.
+
+  // Patinho: carne magra, baixo teor de gordura. Fonte CSV: R$28,99/kg
+  // Airfryer: perde ~18% água, gordura escorre pouco (já é magro ~6g → ~5g restante)
+  // 130g → ~221 kcal | 180g → ~306 kcal
+  { id:128,name:"Hamburguer caseiro patinho",rawCal:143, cookedCal:170, group:"Proteina",   color:"#C97B5A", price:2.900, priceDesc:"kg~R$28,99/Irani Açougue", macro:{p:31,c:0,f:5,fi:0,su:0,na:68,k:320,ch:75},
+    measures:[
+      {label:"Hamburguer 130g (magro)",g:130},
+      {label:"Hamburguer 180g (padrao)",g:180},
+    ]},
+  // Acém: corte mais gordo. Na airfryer a gordura escorre MENOS que na churrasqueira
+  // (carne fica no cesto, reabsorve parte). ~18g → ~13g gordura restante
+  // 130g → ~305 kcal | 180g → ~423 kcal
+  { id:129,name:"Hamburguer caseiro acem",   rawCal:250, cookedCal:235, group:"Proteina",   color:"#B05830", price:2.500, priceDesc:"kg~R$25,00/Irani Açougue", macro:{p:26,c:0,f:13,fi:0,su:0,na:72,k:280,ch:78},
+    measures:[
+      {label:"Hamburguer 130g (magro)",g:130},
+      {label:"Hamburguer 180g (padrao)",g:180},
+    ]},
+  // Colchão mole: gordura intermediária. Airfryer: ~14g → ~11g gordura restante
+  // 130g → ~273 kcal | 180g → ~378 kcal
+  { id:130,name:"Hamburguer colchao mole",   rawCal:200, cookedCal:210, group:"Proteina",   color:"#A06840", price:3.200, priceDesc:"kg~R$32,00/Irani Açougue", macro:{p:27,c:0,f:11,fi:0,su:0,na:65,k:300,ch:77},
+    measures:[
+      {label:"Hamburguer 130g (magro)",g:130},
+      {label:"Hamburguer 180g (padrao)",g:180},
+    ]},
 ];
 
 const GROUP_ICONS = {
@@ -278,6 +321,17 @@ function calcCal(food, grams, cooked) {
 function getEffectivePrice(food, customPrices) {
   if(customPrices && customPrices[food.id] !== undefined) return customPrices[food.id];
   return food.price || 0;
+}
+
+// Resolve macro for a menu item (handles both FOODS and custom foods)
+function resolveMacro(item, customFoodsList) {
+  if(!item.isCustom) {
+    const food = FOODS.find(f=>f.id===item.foodId);
+    return food?.macro || null;
+  }
+  // Custom food — look up macro in customFoodsList
+  const cf = (customFoodsList||[]).find(x=>x.name===item.name);
+  return cf?.macro || null;
 }
 function calcPrice(food, grams, customPrices) {
   const p = getEffectivePrice(food, customPrices);
@@ -318,7 +372,7 @@ function exportPDF(menu, totalCal, dailyGoal, profile) {
     .ic{font-family:'Playfair Display',serif;font-weight:700;color:#5C3018;font-size:14px;min-width:70px;text-align:right}
     </style></head><body>
     <h1>Cardapio Diario</h1><div class="sub">${dateStr}</div>
-    ${profile?.nome?`<p style="font-size:12px;color:#8B7050;margin-bottom:16px">👤 ${profile.nome}${profile.weight?` · ${profile.weight} kg`:""}${profile.height?` · ${profile.height} cm`:""}</p>`:""}
+    ${currentProfile?.nome?`<p style="font-size:12px;color:#8B7050;margin-bottom:16px">👤 ${currentProfile.nome}${currentProfile.weight?` · ${profile.weight} kg`:""}${currentProfile.height?` · ${profile.height} cm`:""}</p>`:""}
     <div class="meta">
       <div><label>Total</label><strong>${totalCal} kcal</strong></div>
       <div><label>Meta</label><strong>${dailyGoal} kcal</strong></div>
@@ -339,7 +393,13 @@ function exportJSON(menu, profile, dailyGoal, customPrices) {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function DietaTracker() {
   const [activeTab, setActiveTab]   = useState("cardapio");
+  const [activeProfile, setActiveProfile] = useState("ivan"); // "ivan" | "ju"
   const [menu, setMenu]             = useState([]);
+  const [menuJu, setMenuJu]         = useState([]);
+  const [menuLixo, setMenuLixo]     = useState([]);
+  const [fbLoaded, setFbLoaded]     = useState(false);
+  const [fbSaving, setFbSaving]     = useState(false);
+  const [fbError,  setFbError]      = useState(null);
   const [search, setSearch]         = useState("");
   const [selGroup, setSelGroup]     = useState("Todos");
   const [targetMeal, setTargetMeal] = useState("cafe");
@@ -353,21 +413,65 @@ export default function DietaTracker() {
   const [breadToast, setBreadToast] = useState(null);
   const [lastAdded, setLastAdded]   = useState(null);
   const [customFood, setCustomFood] = useState(null);
+  const [confirmDeleteFood, setConfirmDeleteFood] = useState(null); // id to confirm deletion
+  const [customFoodsList, setCustomFoodsList] = useState([]); // saved custom foods shown in Alimentos
   const [history, setHistory]       = useState({}); // { "YYYY-MM-DD": {menu, totalCal} }
 
   function todayKey() { return new Date().toISOString().split("T")[0]; }
   function saveDay() {
     const key = todayKey();
-    setHistory(prev => ({...prev, [key]: { menu: [...menu], totalCal }}));
+    setHistory(prev => ({...prev, [key]: { menu: [...currentMenu], totalCal }}));
     showToast("Dia salvo no histórico!");
   }
   const [editItemId, setEditItemId] = useState(null);
   const [customGrams, setCustomGrams] = useState("");
   const fileRef = useRef();
 
-  const [profile, setProfile]            = useState({ nome:"", sex:"M", age:"", weight:"", height:"", activity:"mod", goal:"lose_mod" });
+  const [profile, setProfile]            = useState({ nome:"Ivan", sex:"M", age:"", weight:"", height:"", activity:"mod", goal:"lose_mod" });
   const [dailyGoalManual, setDailyGoalManual] = useState(null);
-  const [customPrices, setCustomPrices]        = useState({}); // { foodId: price_per_100g }
+  // Perfil JU (secundário)
+  const [profileJu, setProfileJu]        = useState({ nome:"Ju", sex:"F", age:"", weight:"", height:"", activity:"mod", goal:"lose_mod" });
+  const [dailyGoalManualJu, setDailyGoalManualJu] = useState(null);
+  const [customPrices, setCustomPrices]  = useState({});
+
+  // Active computed values — switch based on activeProfile
+  const currentMenu       = activeProfile==="ju" ? menuJu    : menu;
+  const setCurrentMenu    = activeProfile==="ju" ? setMenuJu : setMenu;
+  const currentProfile    = activeProfile==="ju" ? profileJu : profile;
+  const setCurrentProfile = activeProfile==="ju" ? setProfileJu : setProfile;
+  const currentGoalManual = activeProfile==="ju" ? dailyGoalManualJu : dailyGoalManual;
+  const setCurrentGoalManual = activeProfile==="ju" ? setDailyGoalManualJu : setDailyGoalManual;
+
+  // ── FIREBASE: carregar dados ao abrir o app ──────────────────────────────
+  useEffect(() => {
+    const ref = doc(db, USER_DOC);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.menu)           setMenu(d.menu);
+        if (d.menuJu)         setMenuJu(d.menuJu);
+        if (d.menuLixo)       setMenuLixo(d.menuLixo);
+        if (d.profile)        setProfile(d.profile);
+        if (d.profileJu)      setProfileJu(d.profileJu);
+        if (d.dailyGoalIvan)  setDailyGoalManual(d.dailyGoalIvan);
+        if (d.dailyGoalJu)    setDailyGoalManualJu(d.dailyGoalJu);
+        // legacy key migration
+        if (!d.dailyGoalIvan && d.dailyGoal) setDailyGoalManual(d.dailyGoal);
+        if (d.customPrices)   setCustomPrices(d.customPrices);
+        if (d.customFoodsList) setCustomFoodsList(d.customFoodsList);
+        if (d.history)        setHistory(d.history);
+      }
+      setFbLoaded(true);
+    }, (err) => {
+      console.error("Firebase:", err);
+      setFbError("Sem conexão com a nuvem. Dados locais apenas.");
+      setFbLoaded(true);
+    });
+    return () => unsub();
+  }, []);
+
+  // ── FIREBASE: salvar automaticamente quando dados mudam ─────────────────
+  const saveTimeout = useRef(null);
 
   // ── AI Generator ──
   const [genIngredients, setGenIngredients] = useState("");
@@ -388,58 +492,113 @@ export default function DietaTracker() {
   const [sugStep, setSugStep]           = useState("form");
   const [sugCopied, setSugCopied]       = useState(false);
 
-  const bmr  = calcBMR(profile.sex, +profile.age, +profile.weight, +profile.height);
-  const act  = ACTIVITY_LEVELS.find(a=>a.id===profile.activity)?.mult || 1.55;
+  const bmr  = calcBMR(currentProfile.sex, +currentProfile.age, +currentProfile.weight, +currentProfile.height);
+  const act  = ACTIVITY_LEVELS.find(a=>a.id===currentProfile.activity)?.mult || 1.55;
   const tdee = bmr ? Math.round(bmr * act) : null;
-  const goalDelta = GOAL_OPTIONS.find(g=>g.id===profile.goal)?.delta || -500;
+  const goalDelta = GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.delta || -500;
   const derivedGoal = tdee ? Math.max(1200, tdee+goalDelta) : 2000;
-  const dailyGoal = dailyGoalManual ?? derivedGoal;
+  const dailyGoal = currentGoalManual ?? derivedGoal;
+
+  // ── FIREBASE: salvar automaticamente quando dados mudam ─────────────────
+  useEffect(() => {
+    if (!fbLoaded) return;
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(async () => {
+      try {
+        setFbSaving(true);
+        await setDoc(doc(db, USER_DOC), {
+          menu, menuJu, menuLixo,
+          profile, profileJu,
+          dailyGoalIvan: dailyGoalManual,
+          dailyGoalJu:   dailyGoalManualJu,
+          customPrices, customFoodsList, history,
+          updatedAt: new Date().toISOString(),
+        });
+        setFbSaving(false);
+      } catch (err) {
+        setFbSaving(false);
+        setFbError("Erro ao salvar na nuvem.");
+      }
+    }, 1500);
+  }, [menu, menuJu, menuLixo, profile, profileJu, dailyGoalManual, dailyGoalManualJu, customPrices, customFoodsList, history, fbLoaded]);
 
   const groups   = ["Todos", ...Array.from(new Set(FOODS.map(f=>f.group)))];
   const filtered = useMemo(()=>FOODS.filter(f=>
     (selGroup==="Todos"||f.group===selGroup) && f.name.toLowerCase().includes(search.toLowerCase())
   ),[search,selGroup]);
 
-  const totalCal = useMemo(()=>menu.reduce((s,i)=>s+i.cal,0),[menu]);
-  const mealCals = useMemo(()=>{const o={};MEALS.forEach(m=>{o[m.id]=menu.filter(i=>i.mealId===m.id).reduce((s,i)=>s+i.cal,0)});return o;},[menu]);
+  // Use currentMenu for all downstream logic
+  const menu_active = currentMenu;
+  const totalCal = useMemo(()=>currentMenu.reduce((s,i)=>s+i.cal*(i.qty||1),0),[currentMenu]);
+  const mealCals = useMemo(()=>{const o={};MEALS.forEach(m=>{o[m.id]=currentMenu.filter(i=>i.mealId===m.id).reduce((s,i)=>s+i.cal*(i.qty||1),0)});return o;},[currentMenu]);
   const pct=Math.min(100,Math.round((totalCal/dailyGoal)*100));
   const barColor=pct<70?"#6AAF6E":pct<97?"#E8A030":"#D04040";
 
   function showToast(msg,type="ok"){setToast({msg,type});setTimeout(()=>setToast(null),2800);}
-  function updateProfile(k,v){setProfile(p=>({...p,[k]:v}));}
+  function updateProfile(k,v){setCurrentProfile(p=>({...p,[k]:v}));}
 
   function addItem(food,measure,mealId){
     const meal=MEALS.find(m=>m.id===mealId);
     const isBread = [12,45,46].includes(food.id);
-    setMenu(prev=>[...prev,{id:Date.now(),mealId,foodId:food.id,name:food.name,measure:measure.label,grams:measure.g,cal:calcCal(food,measure.g,meal.cooked),color:food.color,group:food.group,cooked:meal.cooked,qty:1}]);
+    setCurrentMenu(prev=>[...prev,{id:Date.now(),mealId,foodId:food.id,name:food.name,measure:measure.label,grams:measure.g,cal:calcCal(food,measure.g,meal.cooked),color:food.color,group:food.group,cooked:meal.cooked,qty:1}]);
     setAddModal(null);
     setLastAdded({foodName:food.name, mealId, mealLabel:meal.label});
     setExpanded(p=>({...p,[mealId]:true}));
     if(isBread) setBreadToast(mealId);
   }
-  function removeItem(id){setMenu(prev=>prev.filter(i=>i.id!==id));}
+  function removeItem(id){setCurrentMenu(prev=>prev.filter(i=>i.id!==id));}
 
   function addCustomFood(cf) {
-    const { name, calPer100, grams, mealId } = cf;
-    const g = parseInt(grams), c100 = parseFloat(calPer100);
-    if (!name.trim() || !g || !c100 || g<1 || c100<1) return;
-    const cal = Math.round(c100 * g / 100);
-    const meal = MEALS.find(m=>m.id===mealId);
-    setMenu(prev=>[...prev,{
-      id:Date.now(), mealId, foodId:null, name:name.trim(),
-      measure:`${g}g`, grams:g, cal, color:"#B8B8B8",
-      group:"Personalizado", cooked:meal?.cooked||false, qty:1, isCustom:true
-    }]);
+    const { name, calPer100, grams, mealId, obs, measures, macroP, macroC, macroF } = cf;
+    const c100 = parseFloat(calPer100);
+    if (!name.trim() || !c100 || c100<1) return;
+
+    // Build macro object if any values provided
+    const macro = (macroP||macroC||macroF) ? {
+      p: parseFloat(macroP)||0,
+      c: parseFloat(macroC)||0,
+      f: parseFloat(macroF)||0,
+      fi:0, su:0, na:0, k:0, ch:0,
+    } : null;
+
+    const userMeasures = (measures||[]).filter(m=>m.label.trim()&&m.g>0);
+    const saveMeasures = userMeasures.length > 0 ? userMeasures : [{label:"100g", g:100}];
+
+    const existing = customFoodsList.find(f=>f.name.trim().toLowerCase()===name.trim().toLowerCase());
+    const newFood = {
+      id: existing ? existing.id : `custom_${Date.now()}`,
+      name: name.trim(), calPer100: c100,
+      obs: (obs||"").trim(),
+      measures: saveMeasures,
+      macro,
+      group:"Personalizado", color:"#B8B8B8",
+      createdAt: existing ? existing.createdAt : new Date().toISOString(),
+    };
+    setCustomFoodsList(prev => existing
+      ? prev.map(f => f.id===existing.id ? newFood : f)
+      : [...prev, newFood]
+    );
+
+    // If grams provided, also add to meal
+    const g = parseInt(grams);
+    if (g && g>=1 && mealId) {
+      const cal = Math.round(c100 * g / 100);
+      const meal = MEALS.find(m=>m.id===mealId);
+      setCurrentMenu(prev=>[...prev,{
+        id:Date.now(), mealId, foodId:null, name:name.trim(),
+        measure:`${g}g`, grams:g, cal, color:"#B8B8B8",
+        group:"Personalizado", cooked:meal?.cooked||false, qty:1, isCustom:true, calPer100:c100
+      }]);
+      setLastAdded({foodName:name.trim(), mealId, mealLabel:meal?.label||""});
+      setExpanded(p=>({...p,[mealId]:true}));
+    }
     setCustomFood(null);
-    setLastAdded({foodName:name.trim(), mealId, mealLabel:meal?.label||""});
-    setExpanded(p=>({...p,[mealId]:true}));
   }
 
   function editItemPortion(itemId, food, measure, cooked){
-    setMenu(prev=>prev.map(i=>{
+    setCurrentMenu(prev=>prev.map(i=>{
       if(i.id!==itemId) return i;
-      const q = i.qty||1;
-      return {...i, measure:measure.label, grams:measure.g, cal:calcCal(food,measure.g,cooked)*q};
+      return {...i, measure:measure.label, grams:measure.g, cal:calcCal(food,measure.g,cooked)};
     }));
     setEditItemId(null); setCustomGrams("");
   }
@@ -447,21 +606,21 @@ export default function DietaTracker() {
   function editItemCustomGrams(itemId, food, grams, cooked){
     const g = parseInt(grams);
     if(!g || g < 1 || g > 2000) return;
-    setMenu(prev=>prev.map(i=>{
+    setCurrentMenu(prev=>prev.map(i=>{
       if(i.id!==itemId) return i;
-      const q = i.qty||1;
-      return {...i, measure:`${g}g (personalizado)`, grams:g, cal:calcCal(food,g,cooked)*q};
+      return {...i, measure:`${g}g (personalizado)`, grams:g, cal:calcCal(food,g,cooked)};
     }));
     setEditItemId(null); setCustomGrams("");
   }
 
   function changeQty(itemId, delta){
-    setMenu(prev=>prev.map(i=>{
+    setCurrentMenu(prev=>prev.map(i=>{
       if(i.id!==itemId) return i;
       const food = FOODS.find(f=>f.id===i.foodId);
       const q = Math.max(1, Math.min(10, (i.qty||1)+delta));
-      const baseCal = food ? calcCal(food, i.grams, i.cooked) : Math.round(i.cal/(i.qty||1));
-      return {...i, qty:q, cal:baseCal*q};
+      // Keep cal as base 1-unit value; totalCal multiplies by qty
+      const baseCal = food ? calcCal(food, i.grams, i.cooked) : i.cal;
+      return {...i, qty:q, cal:baseCal};
     }));
   }
 
@@ -480,12 +639,12 @@ export default function DietaTracker() {
     setActiveTab("substituicoes");
   }
   function applySub(item,food,measure){
-    setMenu(prev=>prev.map(i=>i.id===item.id?{...i,foodId:food.id,name:food.name,measure:measure.label,grams:measure.g,cal:calcCal(food,measure.g,item.cooked),color:food.color,group:food.group}:i));
+    setCurrentMenu(prev=>prev.map(i=>i.id===item.id?{...i,foodId:food.id,name:food.name,measure:measure.label,grams:measure.g,cal:calcCal(food,measure.g,item.cooked),color:food.color,group:food.group}:i));
     setSubTarget(null);setSubResults([]);setActiveTab("cardapio");showToast("Substituicao aplicada!");
   }
   function handleImport(e){
     const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.menu)setMenu(d.menu);if(d.profile)setProfile(d.profile);if(d.dailyGoal)setDailyGoalManual(d.dailyGoal);if(d.customPrices)setCustomPrices(d.customPrices);showToast("Backup importado!");}catch{showToast("Arquivo invalido.","err");}};
+    const reader=new FileReader();reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.menu)setCurrentMenu(d.menu);if(d.profile)setCurrentProfile(d.profile);if(d.dailyGoal)setCurrentGoalManual(d.dailyGoal);if(d.customPrices)setCustomPrices(d.customPrices);showToast("Backup importado!");}catch{showToast("Arquivo invalido.","err");}};
     reader.readAsText(file);e.target.value="";
   }
 
@@ -494,8 +653,8 @@ export default function DietaTracker() {
     if(!genIngredients.trim()){setGenError("Informe ao menos um ingrediente.");return;}
     setGenLoading(true);setGenError("");setGenResult(null);
     const catalog=FOODS.map(f=>({id:f.id,name:f.name,group:f.group,kcalCozido:f.cookedCal,kcalCru:f.rawCal,porcoes:f.measures.map((m,i)=>({index:i,label:m.label,g:m.g}))}));
-    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===profile.goal)?.label}.`:`Meta calorica: ${dailyGoal} kcal.`;
-    const prompt=`Voce e um nutricionista brasileiro criando um cardapio diario pratico.\n\nCONTEXTO: ${userCtx}${profile.nome?` Nome: ${profile.nome}.`:""}\n\nINGREDIENTES DISPONIVEIS (almoco/jantar):\n${genIngredients}\n\nPREFERENCIAS:\n${genPrefs||"Nenhuma."}\n\nCATALOGO (use APENAS estes IDs):\n${JSON.stringify(catalog)}\n\nINSTRUCOES:\n- 6 refeicoes: cafe, lanche1, almoco, lanche2, jantar, ceia\n- Use os ingredientes informados no almoco e jantar\n- Total de kcal entre 90%-105% de ${dailyGoal} kcal\n- Almoco/jantar: proteina + carbo + vegetal\n- Use somente foodId e measureIndex do catalogo\n\nRESPONDA SOMENTE JSON:\n{"meals":[{"mealId":"cafe","items":[{"foodId":4,"measureIndex":1}]}],"totalCalEstimado":1800,"notes":"dica breve"}`;
+    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica: ${dailyGoal} kcal.`;
+    const prompt=`Voce e um nutricionista brasileiro criando um cardapio diario pratico.\n\nCONTEXTO: ${userCtx}${currentProfile.nome?` Nome: ${currentProfile.nome}.`:""}\n\nINGREDIENTES DISPONIVEIS (almoco/jantar):\n${genIngredients}\n\nPREFERENCIAS:\n${genPrefs||"Nenhuma."}\n\nCATALOGO (use APENAS estes IDs):\n${JSON.stringify(catalog)}\n\nINSTRUCOES:\n- 6 refeicoes: cafe, lanche1, almoco, lanche2, jantar, ceia\n- Use os ingredientes informados no almoco e jantar\n- Total de kcal entre 90%-105% de ${dailyGoal} kcal\n- Almoco/jantar: proteina + carbo + vegetal\n- Use somente foodId e measureIndex do catalogo\n\nRESPONDA SOMENTE JSON:\n{"meals":[{"mealId":"cafe","items":[{"foodId":4,"measureIndex":1}]}],"totalCalEstimado":1800,"notes":"dica breve"}`;
     try{
       const response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
       const data=await response.json();
@@ -519,13 +678,13 @@ export default function DietaTracker() {
   async function generateSuggestion(){
     setSugLoading(true);setSugError("");setSugResult(null);
     const catalog=FOODS.map(f=>({id:f.id,name:f.name,group:f.group,kcalCozido:f.cookedCal,porcoes:f.measures.map((m,i)=>({index:i,label:m.label,g:m.g}))}));
-    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===profile.goal)?.label}.`:`Meta calorica diaria: ${dailyGoal} kcal.`;
+    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica diaria: ${dailyGoal} kcal.`;
     const cookMealLabel={almoco:"apenas o almoco",jantar:"apenas o jantar",ambos:"almoco e jantar",nenhum:"nenhuma refeicao quente"};
     const prompt=`Voce e um nutricionista e personal chef brasileiro. Crie um planejamento diario completo.
 
 CONTEXTO DO USUARIO:
 ${userCtx}
-${profile.nome?`Nome: ${profile.nome}.`:""}
+${currentProfile.nome?`Nome: ${currentProfile.nome}.`:""}
 Refeicoes que o usuario vai cozinhar: ${cookMealLabel[sugCookMeal]}.
 Pessoas a cozinhar: ${sugPeople}.
 ${sugIngred?`Ingredientes ja disponiveis: ${sugIngred}.`:""}
@@ -585,7 +744,7 @@ RESPONDA SOMENTE JSON VALIDO:
     navigator.clipboard.writeText(text).then(()=>{setSugCopied(true);setTimeout(()=>setSugCopied(false),2000);});
   }
 
-  const TABS=[["cardapio","📋","Cardapio"],["alimentos","🔍","Alimentos"],["substituicoes","🔄","Trocas"],["gerar","✨","Gerar"],["sugestao","🛒","Sugestao"],["receitas","👨‍🍳","Receitas"],["semana","📅","Semana"],["precos","💰","Precos"],["relatorio","📊","Relatorio"],["tmb","🧮","TMB"],["dados","💾","Dados"]];
+  const TABS=[["cardapio","📋","Cardapio"],["alimentos","🔍","Alimentos"],["substituicoes","🔄","Trocas"],["gerar","✨","Gerar"],["sugestao","🛒","Sugestao"],["receitas","👨‍🍳","Receitas"],["semana","📅","Semana"],["lixo","🍔","Lixo"],["precos","💰","Precos"],["relatorio","📊","Relatorio"],["tmb","🧮","TMB"],["dados","💾","Dados"]];
 
   return (
     <div style={{fontFamily:"'Source Sans 3',sans-serif",minHeight:"100vh",background:"#F2EDE4",color:"#2A2420",position:"relative"}}>
@@ -633,10 +792,31 @@ RESPONDA SOMENTE JSON VALIDO:
       {/* HEADER */}
       <div style={{background:"linear-gradient(150deg,#2C1A0E 0%,#5C3018 55%,#8B5E3C 100%)",color:"#F5E8D0",padding:"18px 16px 0"}}>
         <div style={{maxWidth:480,margin:"0 auto"}}>
-          <p style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",opacity:.6,marginBottom:2}}>Plano Alimentar</p>
+          <p style={{fontSize:10,letterSpacing:".22em",textTransform:"uppercase",opacity:.6,marginBottom:6}}>Plano Alimentar</p>
+          {/* Profile switcher */}
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            {[["ivan","👨 Ivan"],["ju","👩 Ju"]].map(([id,label])=>(
+              <button key={id} className="btn" onClick={()=>setActiveProfile(id)}
+                style={{padding:"5px 14px",borderRadius:20,fontSize:12,fontWeight:700,
+                  background:activeProfile===id?"rgba(255,255,255,.3)":"rgba(255,255,255,.1)",
+                  color:"#F5E8D0",border:activeProfile===id?"1.5px solid rgba(255,255,255,.6)":"1px solid rgba(255,255,255,.2)"}}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
             <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700}}>Dieta Diaria</h1>
-            {profile.nome&&<span style={{fontSize:12,opacity:.7}}>Ola, {profile.nome.split(" ")[0]}!</span>}
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {currentProfile.nome&&<span style={{fontSize:12,opacity:.7}}>Ola, {currentProfile.nome.split(" ")[0]}!</span>}
+              {fbSaving
+                ? <span style={{fontSize:10,opacity:.7}}>☁️ salvando...</span>
+                : fbError
+                  ? <span style={{fontSize:10,color:"#FFB3B3"}} title={fbError}>⚠️ offline</span>
+                  : fbLoaded
+                    ? <span style={{fontSize:10,opacity:.6}}>☁️ sincronizado</span>
+                    : <span style={{fontSize:10,opacity:.5}}>☁️ conectando...</span>
+              }
+            </div>
           </div>
           <div style={{margin:"12px 0 4px",background:"rgba(255,255,255,.15)",borderRadius:8,height:8,overflow:"hidden"}}>
             <div style={{height:"100%",width:`${pct}%`,background:barColor,borderRadius:8,transition:"width .5s"}}/>
@@ -661,12 +841,19 @@ RESPONDA SOMENTE JSON VALIDO:
         {activeTab==="cardapio"&&(
           <div className="sl" style={{paddingTop:14,display:"flex",flexDirection:"column",gap:10}}>
             {MEALS.map(meal=>{
-              const items=menu.filter(i=>i.mealId===meal.id);const mcal=mealCals[meal.id];const open=expanded[meal.id];
+              const items=currentMenu.filter(i=>i.mealId===meal.id);const mcal=mealCals[meal.id];const open=expanded[meal.id];
               const mealCost=items.reduce((s,item)=>{
+                const qty=item.qty||1;
+                if(item.isCustom){
+                  // preço do alimento personalizado vem do customFoodsList
+                  const cf=customFoodsList.find(x=>x.name===item.name);
+                  const p=cf?.price||0;
+                  return s+p*item.grams*qty/100;
+                }
                 const food=FOODS.find(f=>f.id===item.foodId);
                 if(!food) return s;
                 const p=getEffectivePrice(food,customPrices);
-                return s+p*item.grams*(item.qty||1)/100;
+                return s+p*item.grams*qty/100;
               },0);
               return(
                 <div key={meal.id} className="card" style={{overflow:"hidden"}}>
@@ -680,10 +867,10 @@ RESPONDA SOMENTE JSON VALIDO:
                     <div onClick={()=>setExpanded(p=>({...p,[meal.id]:!p[meal.id]}))} style={{textAlign:"right",flexShrink:0,cursor:"pointer"}}>
                       {mcal>0?<><span style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:"#5C3018"}}>{mcal}</span><br/><span style={{fontSize:10,color:"#8B7050"}}>kcal</span></>:<span style={{fontSize:16,color:"#C8B8A0"}}>-</span>}
                     </div>
-                    {/* Pie chart + cost for main meals */}
-                    {["cafe","almoco","jantar"].includes(meal.id) && items.length>0 && (
+                    {/* Pie chart + cost for all meals with items */}
+                    {items.length>0 && (
                       <div onClick={()=>setExpanded(p=>({...p,[meal.id]:!p[meal.id]}))} style={{cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                        <MealPieChart items={items}/>
+                        <MealPieChart items={items} customFoodsList={customFoodsList}/>
                         {mealCost>0&&<span style={{fontSize:10,fontWeight:700,color:"#286028",whiteSpace:"nowrap"}}>💰 {fmtPrice(mealCost)}</span>}
                       </div>
                     )}
@@ -713,7 +900,7 @@ RESPONDA SOMENTE JSON VALIDO:
                                 <span style={{fontWeight:700,fontSize:13,color:"#5C3018",minWidth:14,textAlign:"center"}}>{qty}</span>
                                 <button className="btn" onClick={()=>changeQty(item.id,+1)} style={{background:"#EDE5D8",borderRadius:6,width:22,height:22,fontSize:14,fontWeight:700,color:"#5C3018",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>+</button>
                               </div>
-                              <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:14,color:"#5C3018",flexShrink:0,minWidth:54,textAlign:"right"}}>{item.cal} kcal</span>
+                              <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:14,color:"#5C3018",flexShrink:0,minWidth:54,textAlign:"right"}}>{item.cal*qty} kcal</span>
                               <div style={{display:"flex",gap:3,flexShrink:0}}>
                                 <button className="btn" onClick={()=>{setEditItemId(isEditing?null:item.id);setCustomGrams("");}} style={{background:isEditing?"#8B5E3C":"#EDE5D8",color:isEditing?"#FFF":"#5C3018",borderRadius:7,padding:"3px 7px",fontSize:11,fontWeight:600}}>✏️</button>
                                 <button className="btn" onClick={()=>findSub(item)} style={{background:"#EDE5D8",borderRadius:7,padding:"3px 7px",fontSize:11,fontWeight:600,color:"#5C3018"}}>🔄</button>
@@ -739,7 +926,7 @@ RESPONDA SOMENTE JSON VALIDO:
                             )}
                           </div>
                         );})}
-                      {["cafe","almoco","jantar"].includes(meal.id) && items.length>0 && <MacroTotalsRow items={items}/>}
+                      {items.length>0 && <MacroTotalsRow items={items} customFoodsList={customFoodsList}/>}
                     </div>
                   )}
                 </div>
@@ -754,11 +941,17 @@ RESPONDA SOMENTE JSON VALIDO:
                 </div>
                 {(()=>{
                   const totalCost=menu.reduce((s,item)=>{
+                    const qty=item.qty||1;
+                    if(item.isCustom){
+                      const cf=customFoodsList.find(x=>x.name===item.name);
+                      const p=cf?.price||0;
+                      return s+p*item.grams*qty/100;
+                    }
                     const food=FOODS.find(f=>f.id===item.foodId);
                     if(!food) return s;
                     const p=getEffectivePrice(food,customPrices);
                     if(!p) return s;
-                    return s+p*item.grams*(item.qty||1)/100;
+                    return s+p*item.grams*qty/100;
                   },0);
                   return totalCost>0&&(
                     <div style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"6px 12px",marginBottom:10,display:"inline-flex",alignItems:"center",gap:6}}>
@@ -767,12 +960,18 @@ RESPONDA SOMENTE JSON VALIDO:
                     </div>
                   );
                 })()}
-                <div style={{display:"flex",flexWrap:"wrap",gap:"7px 16px"}}>
-                  {MEALS.map(m=>mealCals[m.id]>0&&(<div key={m.id}><p style={{fontSize:10,opacity:.6}}>{m.icon} {m.label}</p><p style={{fontSize:14,fontWeight:700}}>{mealCals[m.id]} kcal</p></div>))}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px 12px"}}>
+                  {MEALS.map(m=>mealCals[m.id]>0&&(
+                    <div key={m.id} style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"6px 10px"}}>
+                      <p style={{fontSize:10,opacity:.6}}>{m.icon} {m.label}</p>
+                      <p style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700}}>{mealCals[m.id]}</p>
+                      <p style={{fontSize:9,opacity:.5}}>kcal</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
-            {menu.length>0&&<NutrientAnalysis menu={menu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+profile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")}/>}
+            {currentMenu.length>0&&<NutrientAnalysis menu={currentMenu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+currentProfile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")} customFoodsList={customFoodsList}/>}
           </div>
         )}
 
@@ -803,14 +1002,76 @@ RESPONDA SOMENTE JSON VALIDO:
               {groups.map(g=>(<button key={g} className={`pill ${selGroup===g?"on":""}`} onClick={()=>setSelGroup(g)}>{g!=="Todos"?GROUP_ICONS[g]:"✦"} {g}</button>))}
             </div>
             {/* Custom food button */}
-            <button className="btn" onClick={()=>setCustomFood({name:"",calPer100:"",grams:"",mealId:targetMeal})}
+            <button className="btn" onClick={()=>setCustomFood({name:"",calPer100:"",grams:"",mealId:targetMeal,obs:"",measures:[],macroP:"",macroC:"",macroF:""})}
               style={{width:"100%",background:"linear-gradient(135deg,#2C1A0E,#5C3018)",color:"#F5E8D0",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,marginBottom:12,textAlign:"left"}}>
               <span style={{fontSize:24}}>✏️</span>
               <div>
                 <p style={{fontWeight:700,fontSize:14}}>Alimento personalizado</p>
-                <p style={{fontSize:12,opacity:.75}}>Informe o nome, kcal/100g e peso para calcular exatamente</p>
+                <p style={{fontSize:12,opacity:.75}}>Informe nome e kcal/100g — salva na lista ou adiciona ao cardápio</p>
               </div>
             </button>
+
+            {/* Saved custom foods */}
+            {customFoodsList.length>0&&(selGroup==="Todos"||selGroup==="Personalizado")&&(
+              <div style={{marginBottom:8}}>
+                <p style={{fontSize:11,color:"#8B7050",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>✏️ Meus alimentos ({customFoodsList.length})</p>
+                {customFoodsList.filter(cf=>cf.name.toLowerCase().includes(search.toLowerCase())).map(cf=>(
+                  <div key={cf.id} className="card" style={{padding:"12px 14px",marginBottom:8,border:"1.5px solid #C8B8A033"}}>
+                    {/* Header row */}
+                    <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:6}}>
+                      <div style={{width:36,height:36,borderRadius:9,background:"#B8B8B822",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>✏️</div>
+                      <div style={{flex:1}}>
+                        <p style={{fontWeight:700,fontSize:14}}>{cf.name}</p>
+                        <span style={{fontSize:11,color:"#5C3018",fontWeight:700}}>{cf.calPer100} kcal/100g</span>
+                        {cf.obs&&<p style={{fontSize:11,color:"#8B7050",marginTop:2,fontStyle:"italic"}}>📝 {cf.obs}</p>}
+                      </div>
+                      {/* Edit button */}
+                      <button className="btn" onClick={()=>setCustomFood({
+                          name:cf.name, calPer100:String(cf.calPer100),
+                          obs:cf.obs||"", grams:"", mealId:targetMeal,
+                          measures:[...(cf.measures||[])],
+                          macroP: cf.macro?.p||"",
+                          macroC: cf.macro?.c||"",
+                          macroF: cf.macro?.f||"",
+                          _editId:cf.id
+                        })}
+                        style={{background:"#EDE5D8",color:"#5C3018",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600}}>✏️</button>
+                      {/* Delete with confirmation */}
+                      {confirmDeleteFood===cf.id
+                        ? <div style={{display:"flex",gap:4,flexShrink:0}}>
+                            <button className="btn" onClick={()=>{setCustomFoodsList(p=>p.filter(f=>f.id!==cf.id));setConfirmDeleteFood(null);}}
+                              style={{background:"#C0392B",color:"#FFF",borderRadius:8,padding:"4px 9px",fontSize:11,fontWeight:700}}>Excluir</button>
+                            <button className="btn" onClick={()=>setConfirmDeleteFood(null)}
+                              style={{background:"#EDE5D8",color:"#5C3018",borderRadius:8,padding:"4px 8px",fontSize:11}}>Não</button>
+                          </div>
+                        : <button className="btn" onClick={()=>setConfirmDeleteFood(cf.id)}
+                            style={{background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"4px 8px",fontSize:11,flexShrink:0}}>🗑️</button>
+                      }
+                    </div>
+                    {/* Portion buttons — use saved measures or fallback */}
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {(cf.measures&&cf.measures.length>0 ? cf.measures : [{label:"100g",g:100},{label:"50g",g:50},{label:"150g",g:150}]).map((m,mi)=>{
+                        const cal=Math.round(cf.calPer100*m.g/100);
+                        return(
+                          <button key={mi} className="btn" onClick={()=>{
+                            const meal=MEALS.find(ml=>ml.id===targetMeal);
+                            setCurrentMenu(prev=>[...prev,{
+                              id:Date.now(), mealId:targetMeal, foodId:null, name:cf.name,
+                              measure:`${m.label} (${m.g}g)`, grams:m.g, cal, color:"#B8B8B8",
+                              group:"Personalizado", cooked:meal?.cooked||false, qty:1, isCustom:true, calPer100:cf.calPer100
+                            }]);
+                            setLastAdded({foodName:cf.name, mealId:targetMeal, mealLabel:meal?.label||""});
+                            setExpanded(p=>({...p,[targetMeal]:true}));
+                          }} style={{background:"#B8B8B822",border:"1.5px solid #B8B8B888",borderRadius:18,padding:"5px 11px",fontSize:11,fontWeight:600,color:"#2A2420"}}>
+                            + {m.label} <span style={{opacity:.65}}>· {cal} kcal</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {filtered.map(food=>{
                 const isCook=MEALS.find(m=>m.id===targetMeal)?.cooked;const changed=food.rawCal!==food.cookedCal;
@@ -1074,8 +1335,17 @@ RESPONDA SOMENTE JSON VALIDO:
         {/* ══ SEMANA ══ */}
         {activeTab==="semana"&&<SemanaTab/>}
 
+        {/* ══ LIXO ══ */}
+        {activeTab==="lixo"&&(
+          <LixoTab
+            menuLixo={menuLixo} setMenuLixo={setMenuLixo}
+            customPrices={customPrices} customFoodsList={customFoodsList}
+            dailyGoal={dailyGoal}
+          />
+        )}
+
         {/* ══ PRECOS ══ */}
-        {activeTab==="precos"&&<PrecosTab customPrices={customPrices} setCustomPrices={setCustomPrices}/>}
+        {activeTab==="precos"&&<PrecosTab customPrices={customPrices} setCustomPrices={setCustomPrices} customFoodsList={customFoodsList} setCustomFoodsList={setCustomFoodsList}/>}
 
         {/* ══ RECEITAS ══ */}
         {activeTab==="receitas"&&<ReceitasTab setActiveTab={setActiveTab} setTargetMeal={setTargetMeal} addItem={addItem} MEALS_REF={MEALS}/>}
@@ -1083,9 +1353,10 @@ RESPONDA SOMENTE JSON VALIDO:
         {/* ══ RELATORIO ══ */}
         {activeTab==="relatorio"&&(
           <RelatórioTab
-            menu={menu} history={history} dailyGoal={dailyGoal}
-            profile={profile} weight={+profile.weight||0}
+            menu={currentMenu} history={history} dailyGoal={dailyGoal}
+            profile={currentProfile} weight={+currentProfile.weight||0}
             saveDay={saveDay} todayKey={todayKey}
+            customFoodsList={customFoodsList}
           />
         )}
 
@@ -1096,16 +1367,16 @@ RESPONDA SOMENTE JSON VALIDO:
               <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>Dados Pessoais</p>
               <p style={{fontSize:12,color:"#8B7050",marginBottom:12}}>Formula de Mifflin-St Jeor</p>
               <label className="lbl" style={{marginTop:0}}>Nome</label>
-              <input className="inp" placeholder="Seu nome" value={profile.nome} onChange={e=>updateProfile("nome",e.target.value)}/>
+              <input className="inp" placeholder="Seu nome" value={currentProfile.nome} onChange={e=>updateProfile("nome",e.target.value)}/>
               <label className="lbl">Sexo biologico</label>
-              <div className="seg"><button className={`seg-btn ${profile.sex==="M"?"on":""}`} onClick={()=>updateProfile("sex","M")}>Masculino</button><button className={`seg-btn ${profile.sex==="F"?"on":""}`} onClick={()=>updateProfile("sex","F")}>Feminino</button></div>
+              <div className="seg"><button className={`seg-btn ${currentProfile.sex==="M"?"on":""}`} onClick={()=>updateProfile("sex","M")}>Masculino</button><button className={`seg-btn ${currentProfile.sex==="F"?"on":""}`} onClick={()=>updateProfile("sex","F")}>Feminino</button></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                <div><label className="lbl">Idade</label><input className="inp" type="number" min="10" max="110" placeholder="anos" value={profile.age} onChange={e=>updateProfile("age",e.target.value)}/></div>
-                <div><label className="lbl">Peso (kg)</label><input className="inp" type="number" min="30" max="300" placeholder="kg" value={profile.weight} onChange={e=>updateProfile("weight",e.target.value)}/></div>
-                <div><label className="lbl">Altura (cm)</label><input className="inp" type="number" min="100" max="250" placeholder="cm" value={profile.height} onChange={e=>updateProfile("height",e.target.value)}/></div>
+                <div><label className="lbl">Idade</label><input className="inp" type="number" min="10" max="110" placeholder="anos" value={currentProfile.age} onChange={e=>updateProfile("age",e.target.value)}/></div>
+                <div><label className="lbl">Peso (kg)</label><input className="inp" type="number" min="30" max="300" placeholder="kg" value={currentProfile.weight} onChange={e=>updateProfile("weight",e.target.value)}/></div>
+                <div><label className="lbl">Altura (cm)</label><input className="inp" type="number" min="100" max="250" placeholder="cm" value={currentProfile.height} onChange={e=>updateProfile("height",e.target.value)}/></div>
               </div>
               <label className="lbl">Nivel de atividade</label>
-              <select className="sel" value={profile.activity} onChange={e=>updateProfile("activity",e.target.value)}>
+              <select className="sel" value={currentProfile.activity} onChange={e=>updateProfile("activity",e.target.value)}>
                 {ACTIVITY_LEVELS.map(a=><option key={a.id} value={a.id}>{a.label} - {a.desc}</option>)}
               </select>
             </div>
@@ -1122,14 +1393,14 @@ RESPONDA SOMENTE JSON VALIDO:
                 <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:12}}>Objetivo Calorico</p>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {GOAL_OPTIONS.map(g=>{const val=tdee?Math.max(1200,tdee+g.delta):null;return(
-                    <div key={g.id} className={`goal-card ${profile.goal===g.id?"on":""}`} onClick={()=>{updateProfile("goal",g.id);setDailyGoalManual(null);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div key={g.id} className={`goal-card ${currentProfile.goal===g.id?"on":""}`} onClick={()=>{updateProfile("goal",g.id);setCurrentGoalManual(null);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                       <div><p style={{fontWeight:700,fontSize:14}}>{g.label}</p><p style={{fontSize:12,color:"#8B7050"}}>{g.desc}</p></div>
                       {val&&<span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:17,color:"#5C3018",flexShrink:0}}>{val} kcal</span>}
                     </div>
                   );})}
                 </div>
                 <label className="lbl">Ou meta manual (kcal)</label>
-                <input className="inp" type="number" min="800" max="5000" placeholder={`Ex: ${derivedGoal}`} value={dailyGoalManual??""} onChange={e=>setDailyGoalManual(e.target.value?+e.target.value:null)}/>
+                <input className="inp" type="number" min="800" max="5000" placeholder={`Ex: ${derivedGoal}`} value={currentGoalManual??""} onChange={e=>setCurrentGoalManual(e.target.value?+e.target.value:null)}/>
               </div>
             )}
             {!bmr&&<div style={{textAlign:"center",padding:"32px 20px"}}><div style={{fontSize:48,marginBottom:12}}>🧮</div><p style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#8B7050",marginBottom:6}}>Preencha seus dados acima</p><p style={{fontSize:13,color:"#A89878"}}>Calcularemos sua TMB, TDEE e meta ideal.</p></div>}
@@ -1147,7 +1418,7 @@ RESPONDA SOMENTE JSON VALIDO:
                 <div><p style={{fontWeight:700,fontSize:14}}>Salvar dia no histórico</p><p style={{fontSize:12,color:"#8B7050"}}>{totalCal} kcal · {menu.length} itens</p></div>
               </button>
               <p style={{fontSize:13,color:"#8B7050",marginBottom:14}}>Gera um PDF com todas as refeicoes e total calorico.</p>
-              <button className="btn action-btn" onClick={()=>{if(menu.length===0){showToast("Adicione alimentos primeiro","err");return;}exportPDF(menu,totalCal,dailyGoal,profile);}}>
+              <button className="btn action-btn" onClick={()=>{if(menu.length===0){showToast("Adicione alimentos primeiro","err");return;}exportPDF(currentMenu,totalCal,dailyGoal,currentProfile);}}>
                 <span style={{fontSize:28}}>📄</span>
                 <div><p style={{fontWeight:700,fontSize:14}}>Exportar como PDF</p><p style={{fontSize:12,color:"#8B7050"}}>{menu.length} itens · {totalCal} kcal</p></div>
               </button>
@@ -1156,14 +1427,14 @@ RESPONDA SOMENTE JSON VALIDO:
               <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>Backup</p>
               <p style={{fontSize:13,color:"#8B7050",marginBottom:14}}>Salve e restaure cardapio, perfil e metas.</p>
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                <button className="btn action-btn" onClick={()=>exportJSON(menu,profile,dailyGoal,customPrices)}><span style={{fontSize:28}}>💾</span><div><p style={{fontWeight:700,fontSize:14}}>Exportar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>{menu.length} itens</p></div></button>
+                <button className="btn action-btn" onClick={()=>exportJSON(currentMenu,currentProfile,dailyGoal,customPrices)}><span style={{fontSize:28}}>💾</span><div><p style={{fontWeight:700,fontSize:14}}>Exportar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>{menu.length} itens</p></div></button>
                 <button className="btn action-btn" onClick={()=>fileRef.current.click()}><span style={{fontSize:28}}>📂</span><div><p style={{fontWeight:700,fontSize:14}}>Importar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>Restaura cardapio e perfil</p></div></button>
                 <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
             </div>
             <div className="card" style={{padding:"16px"}}>
               <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>Reiniciar Dia</p>
-              <button className="btn action-btn" onClick={()=>{if(menu.length===0){showToast("Cardapio ja esta vazio","err");return;}setMenu([]);showToast("Cardapio limpo!");}} style={{borderColor:"#F4CCCC"}}>
+              <button className="btn action-btn" onClick={()=>{if(menu.length===0){showToast("Cardapio ja esta vazio","err");return;}setCurrentMenu([]);showToast("Cardapio limpo!");}} style={{borderColor:"#F4CCCC"}}>
                 <span style={{fontSize:28}}>🗑️</span><div><p style={{fontWeight:700,fontSize:14,color:"#C0392B"}}>Limpar cardapio</p><p style={{fontSize:12,color:"#8B7050"}}>Acao irreversivel</p></div>
               </button>
             </div>
@@ -1238,7 +1509,7 @@ RESPONDA SOMENTE JSON VALIDO:
               <span style={{fontSize:28}}>✏️</span>
               <div>
                 <p style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>Alimento Personalizado</p>
-                <p style={{fontSize:12,color:"#8B7050"}}>Valores baseados no rotulo ou referencia (FatSecret, TACO, etc.)</p>
+                <p style={{fontSize:12,color:"#8B7050"}}>Valores baseados no rótulo ou referência (FatSecret, TACO, etc.)</p>
               </div>
             </div>
 
@@ -1251,14 +1522,76 @@ RESPONDA SOMENTE JSON VALIDO:
               value={customFood.calPer100}
               onChange={e=>setCustomFood(p=>({...p,calPer100:e.target.value}))}/>
 
-            <label className="lbl">Peso da porcao (gramas)</label>
-            <input className="inp" type="number" min="1" max="5000" placeholder="Ex: 150"
+            {/* Macronutrientes */}
+            <label className="lbl" style={{marginTop:12}}>Macronutrientes por 100g <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
+            <p style={{fontSize:11,color:"#A89878",marginBottom:8}}>Se informar, os macros serão somados no cardápio e nos relatórios.</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:4}}>
+              {[
+                {key:"macroP", label:"Proteína (g)", color:"#C97B5A", placeholder:"Ex: 25"},
+                {key:"macroC", label:"Carb. (g)",    color:"#C8A840", placeholder:"Ex: 40"},
+                {key:"macroF", label:"Gordura (g)",  color:"#4A8050", placeholder:"Ex: 8"},
+              ].map(({key,label,color,placeholder})=>(
+                <div key={key}>
+                  <p style={{fontSize:10,fontWeight:700,color,marginBottom:4}}>{label}</p>
+                  <input className="inp" type="number" min="0" max="500" placeholder={placeholder}
+                    value={customFood[key]||""}
+                    onChange={e=>setCustomFood(p=>({...p,[key]:e.target.value}))}
+                    style={{padding:"8px 10px",fontSize:13}}/>
+                </div>
+              ))}
+            </div>
+            {/* Macro preview */}
+            {(customFood.macroP||customFood.macroC||customFood.macroF)&&(
+              <div style={{background:"#F5EFE6",borderRadius:8,padding:"7px 12px",marginBottom:4,display:"flex",gap:12,flexWrap:"wrap"}}>
+                {customFood.macroP&&<span style={{fontSize:11,color:"#C97B5A",fontWeight:700}}>P: {customFood.macroP}g</span>}
+                {customFood.macroC&&<span style={{fontSize:11,color:"#C8A840",fontWeight:700}}>C: {customFood.macroC}g</span>}
+                {customFood.macroF&&<span style={{fontSize:11,color:"#4A8050",fontWeight:700}}>G: {customFood.macroF}g</span>}
+                <span style={{fontSize:11,color:"#8B7050"}}>
+                  = {Math.round(((+customFood.macroP||0)*4)+((+customFood.macroC||0)*4)+((+customFood.macroF||0)*9))} kcal calculados
+                  {customFood.calPer100&&Math.abs(Math.round(((+customFood.macroP||0)*4)+((+customFood.macroC||0)*4)+((+customFood.macroF||0)*9))-parseFloat(customFood.calPer100))>10&&
+                    <span style={{color:"#E8A030"}}> ⚠️ difere do valor informado</span>}
+                </span>
+              </div>
+            )}
+            <label className="lbl">Observação <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
+            <input className="inp" placeholder="Ex: receita da vovó, sem glúten, marca X..."
+              value={customFood.obs||""}
+              onChange={e=>setCustomFood(p=>({...p,obs:e.target.value}))}/>
+
+            {/* Porções personalizadas */}
+            <label className="lbl" style={{marginTop:12}}>Porções personalizadas <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
+            <p style={{fontSize:11,color:"#A89878",marginBottom:8}}>Crie as porções como quiser. Ex: "1 fatia = 45g", "1 unidade = 70g"</p>
+            {(customFood.measures||[]).map((m,i)=>(
+              <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
+                <input className="inp" placeholder="Ex: 1 unidade" value={m.label}
+                  onChange={e=>setCustomFood(p=>({...p,measures:p.measures.map((x,j)=>j===i?{...x,label:e.target.value}:x)}))}
+                  style={{flex:2,padding:"8px 10px",fontSize:13}}/>
+                <input className="inp" type="number" min="1" max="5000" placeholder="g"
+                  value={m.g||""}
+                  onChange={e=>setCustomFood(p=>({...p,measures:p.measures.map((x,j)=>j===i?{...x,g:parseInt(e.target.value)||0}:x)}))}
+                  style={{flex:1,padding:"8px 10px",fontSize:13}}/>
+                {m.label&&m.g>0&&(
+                  <span style={{fontSize:11,color:"#5C3018",fontWeight:700,whiteSpace:"nowrap"}}>
+                    {Math.round(parseFloat(customFood.calPer100||0)*m.g/100)} kcal
+                  </span>
+                )}
+                <button className="btn" onClick={()=>setCustomFood(p=>({...p,measures:p.measures.filter((_,j)=>j!==i)}))}
+                  style={{background:"#FDECEA",color:"#C0392B",borderRadius:7,padding:"6px 9px",fontSize:12,flexShrink:0}}>✕</button>
+              </div>
+            ))}
+            <button className="btn" onClick={()=>setCustomFood(p=>({...p,measures:[...(p.measures||[]),{label:"",g:0}]}))}
+              style={{background:"#EDE5D8",color:"#5C3018",borderRadius:9,padding:"7px 14px",fontSize:12,fontWeight:600,marginBottom:14,width:"100%"}}>
+              + Adicionar porção
+            </button>
+
+            {/* Quick-add grams for immediate cardápio entry */}
+            <label className="lbl">Adicionar ao cardápio agora <span style={{color:"#8B7050",fontWeight:400}}>— opcional</span></label>
+            <input className="inp" type="number" min="1" max="5000" placeholder="Informe os gramas para adicionar já ao cardápio"
               value={customFood.grams}
               onChange={e=>setCustomFood(p=>({...p,grams:e.target.value}))}/>
 
-            {/* Live calc preview */}
             {customFood.calPer100>0 && customFood.grams>0 && (
-              <div style={{background:"#F5EFE6",borderRadius:10,padding:"10px 14px",margin:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{background:"#F5EFE6",borderRadius:10,padding:"10px 14px",margin:"10px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:13,color:"#8B7050"}}>Total estimado:</span>
                 <span style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:"#5C3018"}}>
                   {Math.round(parseFloat(customFood.calPer100)*parseInt(customFood.grams)/100)} kcal
@@ -1266,21 +1599,25 @@ RESPONDA SOMENTE JSON VALIDO:
               </div>
             )}
 
-            <label className="lbl">Adicionar a qual refeicao</label>
-            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
-              {MEALS.map(m=>(
-                <button key={m.id} className="btn" onClick={()=>setCustomFood(p=>({...p,mealId:m.id}))}
-                  style={{display:"flex",alignItems:"center",gap:10,background:customFood.mealId===m.id?"#FFF8F0":"#F2EDE4",borderRadius:10,padding:"9px 14px",border:`1.5px solid ${customFood.mealId===m.id?"#8B5E3C":"transparent"}`}}>
-                  <span style={{fontSize:18}}>{m.icon}</span>
-                  <span style={{fontWeight:700,fontSize:13}}>{m.label}</span>
-                  {customFood.mealId===m.id&&<span style={{marginLeft:"auto",color:"#8B5E3C",fontSize:16}}>✓</span>}
-                </button>
-              ))}
-            </div>
+            {customFood.grams>0&&(
+              <>
+                <label className="lbl">Adicionar a qual refeição</label>
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+                  {MEALS.map(m=>(
+                    <button key={m.id} className="btn" onClick={()=>setCustomFood(p=>({...p,mealId:m.id}))}
+                      style={{display:"flex",alignItems:"center",gap:10,background:customFood.mealId===m.id?"#FFF8F0":"#F2EDE4",borderRadius:10,padding:"9px 14px",border:`1.5px solid ${customFood.mealId===m.id?"#8B5E3C":"transparent"}`}}>
+                      <span style={{fontSize:18}}>{m.icon}</span>
+                      <span style={{fontWeight:700,fontSize:13}}>{m.label}</span>
+                      {customFood.mealId===m.id&&<span style={{marginLeft:"auto",color:"#8B5E3C",fontSize:16}}>✓</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
 
             <button className="btn" onClick={()=>addCustomFood(customFood)}
               style={{width:"100%",background:"linear-gradient(135deg,#5C3018,#8B5E3C)",color:"#F5E8D0",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700}}>
-              Adicionar ao Cardapio
+              {customFood.grams>0 ? "Salvar e Adicionar ao Cardápio" : "Salvar na Lista de Alimentos"}
             </button>
             <button className="btn" onClick={()=>setCustomFood(null)}
               style={{width:"100%",background:"#EDE5D8",borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#5C4020",marginTop:8}}>
@@ -1296,15 +1633,14 @@ RESPONDA SOMENTE JSON VALIDO:
 }
 
 // ── RelatórioTab ─────────────────────────────────────────────────────────────
-function calcNutrientsForMenu(menuItems) {
+function calcNutrientsForMenu(menuItems, customFoodsList) {
   let cal=0,p=0,c=0,f=0,fi=0,su=0,na=0,k=0,ch=0;
   menuItems.forEach(item => {
-    if(item.isCustom){ cal+=item.cal; return; }
-    const food = FOODS.find(fd=>fd.id===item.foodId);
-    if(!food) { cal+=item.cal; return; }
-    const g = item.grams*(item.qty||1);
-    const m = food.macro||{};
-    cal += item.cal*(item.qty||1);
+    const q = item.qty||1;
+    cal += item.cal*q;
+    const m = resolveMacro(item, customFoodsList)||{};
+    if(!m.p && !m.c && !m.f) return;
+    const g = item.grams*q;
     p   += (m.p||0)*g/100;
     c   += (m.c||0)*g/100;
     f   += (m.f||0)*g/100;
@@ -1317,8 +1653,42 @@ function calcNutrientsForMenu(menuItems) {
   return {cal:Math.round(cal),p:Math.round(p),c:Math.round(c),f:Math.round(f),fi:Math.round(fi),su:Math.round(su),na:Math.round(na),k:Math.round(k),ch:Math.round(ch)};
 }
 
-function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey }) {
+function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey, customFoodsList }) {
   const [subTab, setSubTab] = useState("calorias");
+  const [sortCol, setSortCol] = useState(null);  // null | "name"|"cal"|"p"|"c"|"f"|"fi"|"su"|"ch"|"na"|"k"
+  const [sortDir, setSortDir] = useState(1);     // 1=asc, -1=desc
+
+  function toggleSort(col) {
+    if (sortCol===col) setSortDir(d=>d*-1);
+    else { setSortCol(col); setSortDir(-1); } // default desc
+  }
+  function SortHeader({col, children, style}) {
+    const active = sortCol===col;
+    return (
+      <th onClick={()=>toggleSort(col)} style={{...style, cursor:"pointer", userSelect:"none",
+        color:active?"#5C3018":"#8B7050", fontWeight:active?800:700}}>
+        {children}{active?(sortDir===-1?" ↓":" ↑"):""}
+      </th>
+    );
+  }
+
+  function sortedMenu(menuItems) {
+    if (!sortCol) return menuItems;
+    return [...menuItems].sort((a,b) => {
+      const getVal = (item) => {
+        if (sortCol==="name") return item.name;
+        if (sortCol==="cal") return item.cal*(item.qty||1);
+        const food=FOODS.find(f=>f.id===item.foodId);
+        const q=item.qty||1, g=item.grams;
+        const m=food?.macro||{};
+        const key = sortCol;
+        return (m[key]||0)*g/100*q;
+      };
+      const va=getVal(a), vb=getVal(b);
+      if (typeof va==="string") return sortDir*(va.localeCompare(vb,"pt-BR"));
+      return sortDir*(va-vb);
+    });
+  }
 
   // Build 7-day window ending today
   const today = new Date();
@@ -1335,7 +1705,7 @@ function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, tod
   const todayIso = todayKey();
   const getMenuForDay = (iso) => iso===todayIso ? menu : (history[iso]?.menu||[]);
   const dayData = days.map(iso => ({
-    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso)),
+    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso), customFoodsList),
     isToday: iso===todayIso
   }));
 
@@ -1478,16 +1848,16 @@ function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, tod
               <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:14}}>Alimentos Ingeridos</p>
               {/* Header */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 52px 52px 52px",gap:4,padding:"0 0 8px",borderBottom:"1px solid #EDE5D8",marginBottom:4}}>
-                <span style={{fontSize:12,color:"#8B7050",fontWeight:600}}>Alimento</span>
-                {[["Carbs","#C8A840"],["Gord","#4A8050"],["Prot","#C97B5A"]].map(([lbl,clr])=>(
-                  <div key={lbl} style={{textAlign:"right"}}>
-                    <div style={{fontSize:11,fontWeight:700,color:clr}}>{lbl}</div>
+                <span style={{fontSize:12,color:"#8B7050",fontWeight:600,cursor:"pointer"}} onClick={()=>toggleSort("name")}>Alimento {sortCol==="name"?(sortDir===-1?"↓":"↑"):""}</span>
+                {[["c","Carbs","#C8A840"],["f","Gord","#4A8050"],["p","Prot","#C97B5A"]].map(([key,lbl,clr])=>(
+                  <div key={key} style={{textAlign:"right",cursor:"pointer"}} onClick={()=>toggleSort(key)}>
+                    <div style={{fontSize:11,fontWeight:sortCol===key?800:700,color:clr}}>{lbl}{sortCol===key?(sortDir===-1?" ↓":" ↑"):""}</div>
                     <div style={{fontSize:10,color:"#A89878"}}>(g)</div>
                   </div>
                 ))}
               </div>
               {/* Rows */}
-              {menu.map((item,i)=>{
+              {sortedMenu(menu).map((item,i)=>{
                 const food=FOODS.find(f=>f.id===item.foodId);
                 const q=item.qty||1;
                 const m=food?.macro;
@@ -1563,14 +1933,18 @@ function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, tod
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'Source Sans 3',sans-serif",minWidth:480}}>
                   <thead>
                     <tr style={{borderBottom:"2px solid #EDE5D8"}}>
-                      <th style={{textAlign:"left",padding:"6px 4px",color:"#8B7050",fontWeight:700,fontSize:11,minWidth:100}}>Alimento</th>
-                      {[["Kcal","#E8A07D"],["Prot","#C97B5A"],["Carb","#C8A840"],["Fib","#90C97E"],["Açúc","#E07070"],["Gord","#4A8050"],["Col","#9060C0"],["Na","#F0924A"],["K","#4A8050"]].map(([h,c])=>(
-                        <th key={h} style={{textAlign:"right",padding:"6px 3px",color:c,fontWeight:700,fontSize:10,whiteSpace:"nowrap"}}>{h}</th>
+                      <th onClick={()=>toggleSort("name")} style={{textAlign:"left",padding:"6px 4px",color:sortCol==="name"?"#5C3018":"#8B7050",fontWeight:700,fontSize:11,minWidth:100,cursor:"pointer"}}>
+                        Alimento{sortCol==="name"?(sortDir===-1?" ↓":" ↑"):""}
+                      </th>
+                      {[["cal","Kcal","#E8A07D"],["p","Prot","#C97B5A"],["c","Carb","#C8A840"],["fi","Fib","#90C97E"],["su","Açúc","#E07070"],["f","Gord","#4A8050"],["ch","Col","#9060C0"],["na","Na","#F0924A"],["k","K","#4A8050"]].map(([key,h,c])=>(
+                        <th key={key} onClick={()=>toggleSort(key==="cal"?"cal":key)} style={{textAlign:"right",padding:"6px 3px",color:sortCol===key?c+"CC":c,fontWeight:sortCol===key?800:700,fontSize:10,whiteSpace:"nowrap",cursor:"pointer"}}>
+                          {h}{sortCol===key?(sortDir===-1?" ↓":" ↑"):""}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {menu.map((item)=>{
+                    {sortedMenu(menu).map((item)=>{
                       const food=FOODS.find(f=>f.id===item.foodId);
                       const q=item.qty||1;
                       const m=food?.macro;
@@ -1879,7 +2253,7 @@ function RefeicaoCard({ comboId, tipo }) {
   const prot  = RECEITAS_SEMANA[combo.proteina];
   const bases = combo.bases.map(b=>RECEITAS_SEMANA[b]);
   const totals = calcCombo(comboId);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={{borderRadius:14,border:`1.5px solid ${combo.cor}55`,overflow:"hidden",background:"#FDFAF4"}}>
@@ -1998,8 +2372,8 @@ function RefeicaoCard({ comboId, tipo }) {
 }
 
 function SemanaTab() {
-  const [semana, setSemana] = React.useState(0); // 0 = week 1, 1 = week 2
-  const [diaIdx, setDiaIdx] = React.useState(0);
+  const [semana, setSemana] = useState(0);
+  const [diaIdx, setDiaIdx] = useState(0);
 
   const planoSemana = PLANO_SEMANAS[semana];
   const diaAtual = planoSemana[diaIdx];
@@ -2126,16 +2500,236 @@ function SemanaTab() {
   );
 }
 
+// ── LixoTab ───────────────────────────────────────────────────────────────────
+const LIXO_MEALS = [
+  { id:"lanche_lixo", label:"Lanche",   icon:"🍟", cooked:false },
+  { id:"fast_food",   label:"Fast Food", icon:"🍔", cooked:false },
+  { id:"pizza",       label:"Pizza",     icon:"🍕", cooked:true  },
+  { id:"doce",        label:"Doces",     icon:"🍰", cooked:false },
+  { id:"bebida",      label:"Bebidas",   icon:"🍺", cooked:false },
+  { id:"outros_lixo", label:"Outros",    icon:"🍿", cooked:false },
+];
+
+function LixoTab({ menuLixo, setMenuLixo, customPrices, customFoodsList, dailyGoal }) {
+  const [search, setSearch]         = useState("");
+  const [selGroup, setSelGroup]     = useState("Todos");
+  const [selMeal, setSelMeal]       = useState("fast_food");
+  const [expanded, setExpanded]     = useState({fast_food:true});
+  const [lastAdded, setLastAdded]   = useState(null);
+
+  const groups = ["Todos", ...Array.from(new Set(FOODS.map(f=>f.group)))];
+  const filtered = FOODS.filter(f=>
+    (selGroup==="Todos"||f.group===selGroup) &&
+    f.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const totalCal = menuLixo.reduce((s,i)=>s+i.cal*(i.qty||1), 0);
+  const totalCost = menuLixo.reduce((s,item)=>{
+    const food=FOODS.find(f=>f.id===item.foodId);
+    if(!food) return s;
+    const p=getEffectivePrice(food,customPrices);
+    return s+p*item.grams*(item.qty||1)/100;
+  },0);
+
+  function addLixo(food, measure) {
+    const meal = LIXO_MEALS.find(m=>m.id===selMeal);
+    const cal = calcCal(food, measure.g, meal?.cooked||false);
+    setMenuLixo(prev=>[...prev,{
+      id:Date.now(), mealId:selMeal, foodId:food.id, name:food.name,
+      measure:measure.label, grams:measure.g, cal, color:food.color,
+      group:food.group, cooked:meal?.cooked||false, qty:1
+    }]);
+    setExpanded(p=>({...p,[selMeal]:true}));
+    setLastAdded({foodName:food.name});
+    setTimeout(()=>setLastAdded(null), 2500);
+  }
+
+  function removeItem(id) { setMenuLixo(prev=>prev.filter(i=>i.id!==id)); }
+  function changeQty(id, delta) {
+    setMenuLixo(prev=>prev.map(i=>{
+      if(i.id!==id) return i;
+      const food=FOODS.find(f=>f.id===i.foodId);
+      const q=Math.max(1,Math.min(10,(i.qty||1)+delta));
+      const base=food?calcCal(food,i.grams,i.cooked):i.cal;
+      return {...i,qty:q,cal:base};
+    }));
+  }
+
+  const pctOfGoal = dailyGoal>0 ? Math.round(totalCal/dailyGoal*100) : 0;
+  const overColor = pctOfGoal>80?"#C0392B":pctOfGoal>50?"#E8A030":"#4A8050";
+
+  return (
+    <div className="sl" style={{paddingTop:14,display:"flex",flexDirection:"column",gap:12}}>
+
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#2A1A0A,#6B2D0E)",borderRadius:16,padding:"18px",color:"#F5E8D0"}}>
+        <div style={{fontSize:32,marginBottom:6}}>🍔</div>
+        <p style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>Cardápio Lixo</p>
+        <p style={{fontSize:13,opacity:.85,lineHeight:1.5}}>
+          Monte aqui sua refeição dos dias que fogir da dieta. Veja o total calórico e financeiro sem impactar seu cardápio principal.
+        </p>
+      </div>
+
+      {/* Totals dashboard */}
+      {menuLixo.length>0&&(
+        <div style={{background:"#2A1A0A",borderRadius:14,padding:"14px 16px",color:"#F5E8D0"}}>
+          <p style={{fontSize:10,opacity:.6,textTransform:"uppercase",letterSpacing:".15em",marginBottom:8}}>Resumo da Refeição Lixo</p>
+          <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+            <span style={{fontFamily:"'Playfair Display',serif",fontSize:36,fontWeight:700,color:overColor}}>{totalCal}</span>
+            <span style={{opacity:.7,fontSize:13}}>kcal</span>
+            <span style={{marginLeft:"auto",fontSize:14,fontWeight:700,color:"#90C97E"}}>💰 R$ {totalCost.toFixed(2).replace(".",",")}</span>
+          </div>
+          {/* Progress bar vs daily goal */}
+          <div style={{marginBottom:6}}>
+            <div style={{height:8,background:"rgba(255,255,255,.15)",borderRadius:4,overflow:"hidden"}}>
+              <div style={{width:`${Math.min(100,pctOfGoal)}%`,height:"100%",background:overColor,borderRadius:4,transition:"width .4s"}}/>
+            </div>
+            <p style={{fontSize:11,opacity:.7,marginTop:4}}>{pctOfGoal}% da sua meta diária de {dailyGoal} kcal</p>
+          </div>
+          {pctOfGoal>80&&(
+            <div style={{background:"rgba(192,57,43,.3)",border:"1px solid rgba(192,57,43,.5)",borderRadius:8,padding:"7px 10px",fontSize:12}}>
+              ⚠️ Essa refeição representa mais de {pctOfGoal}% da sua meta diária. Considere compensar nas outras refeições do dia.
+            </div>
+          )}
+          {/* Items by meal */}
+          {LIXO_MEALS.map(meal=>{
+            const items=menuLixo.filter(i=>i.mealId===meal.id);
+            if(items.length===0) return null;
+            const mCal=items.reduce((s,i)=>s+i.cal*(i.qty||1),0);
+            return(
+              <div key={meal.id} style={{marginTop:8,background:"rgba(255,255,255,.08)",borderRadius:8,padding:"6px 10px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}
+                  onClick={()=>setExpanded(p=>({...p,[meal.id]:!p[meal.id]}))}>
+                  <span style={{fontSize:13,fontWeight:700}}>{meal.icon} {meal.label}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"#F5D090"}}>{mCal} kcal</span>
+                </div>
+                {expanded[meal.id]&&items.map(item=>{
+                  const qty=item.qty||1;
+                  return(
+                    <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}>
+                      <span style={{width:22,height:22,borderRadius:6,background:item.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>{GROUP_ICONS[item.group]||"🍴"}</span>
+                      <div style={{flex:1}}>
+                        <p style={{fontSize:12,fontWeight:600}}>{item.name}</p>
+                        <p style={{fontSize:10,opacity:.6}}>{qty>1?`${qty}× `:""}{item.measure}</p>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:3}}>
+                        <button className="btn" onClick={()=>changeQty(item.id,-1)} style={{background:"rgba(255,255,255,.15)",borderRadius:5,width:20,height:20,fontSize:13,fontWeight:700,color:"#F5E8D0",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>−</button>
+                        <span style={{fontWeight:700,fontSize:12,minWidth:12,textAlign:"center"}}>{qty}</span>
+                        <button className="btn" onClick={()=>changeQty(item.id,+1)} style={{background:"rgba(255,255,255,.15)",borderRadius:5,width:20,height:20,fontSize:13,fontWeight:700,color:"#F5E8D0",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>+</button>
+                      </div>
+                      <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:"#F5D090",minWidth:50,textAlign:"right"}}>{item.cal*qty} kcal</span>
+                      <button className="btn" onClick={()=>removeItem(item.id)} style={{background:"rgba(192,57,43,.4)",borderRadius:6,padding:"2px 7px",fontSize:12,color:"#FFB3B3",fontWeight:700}}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <button className="btn" onClick={()=>setMenuLixo([])}
+            style={{marginTop:10,width:"100%",background:"rgba(192,57,43,.3)",border:"1px solid rgba(192,57,43,.4)",color:"#FFB3B3",borderRadius:9,padding:"8px",fontSize:12,fontWeight:600}}>
+            🗑️ Limpar cardápio lixo
+          </button>
+        </div>
+      )}
+
+      {/* Meal type selector */}
+      <div>
+        <p style={{fontSize:11,fontWeight:700,color:"#8B7050",marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Adicionar em:</p>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {LIXO_MEALS.map(m=>(
+            <button key={m.id} className="btn" onClick={()=>setSelMeal(m.id)}
+              style={{padding:"6px 12px",borderRadius:20,fontSize:12,fontWeight:700,
+                background:selMeal===m.id?"#6B2D0E":"#EDE5D8",
+                color:selMeal===m.id?"#F5E8D0":"#5C3018",
+                border:selMeal===m.id?"1.5px solid #A04020":"1.5px solid transparent"}}>
+              {m.icon} {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Added banner */}
+      {lastAdded&&(
+        <div style={{background:"#FFF8F0",border:"1px solid #E8C07D",borderRadius:10,padding:"9px 14px",fontSize:12,color:"#7A4A00",display:"flex",alignItems:"center",gap:8}}>
+          <span>✅</span><span><strong>{lastAdded.foodName}</strong> adicionado ao cardápio lixo!</span>
+        </div>
+      )}
+
+      {/* Food search */}
+      <input className="inp" placeholder="Buscar alimento..." value={search} onChange={e=>setSearch(e.target.value)}/>
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:6}}>
+        {groups.map(g=>(
+          <button key={g} className={`pill ${selGroup===g?"on":""}`} onClick={()=>setSelGroup(g)}>
+            {g!=="Todos"?GROUP_ICONS[g]:"✦"} {g}
+          </button>
+        ))}
+      </div>
+
+      {/* Food list */}
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filtered.map(food=>{
+          const p=getEffectivePrice(food,customPrices);
+          return(
+            <div key={food.id} className="card" style={{padding:"12px 14px",opacity:.95}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                <div style={{width:36,height:36,borderRadius:9,background:food.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{GROUP_ICONS[food.group]||"🍴"}</div>
+                <div style={{flex:1}}>
+                  <p style={{fontWeight:700,fontSize:13}}>{food.name}</p>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                    <span style={{fontSize:12,color:"#8B7050"}}><strong style={{color:"#5C3018"}}>{food.rawCal}</strong> kcal/100g</span>
+                    {p>0&&<span style={{fontSize:11,color:"#286028",fontWeight:700,background:"#E8F5EC",padding:"1px 7px",borderRadius:10}}>💰 {fmtPrice(p)}/100g</span>}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {food.measures.map((m,i)=>{
+                  const cal=calcCal(food,m.g,false);
+                  const pc=calcPrice(food,m.g,customPrices);
+                  return(
+                    <button key={i} className="btn" onClick={()=>addLixo(food,m)}
+                      style={{background:food.color+"22",border:`1.5px solid ${food.color}88`,borderRadius:18,padding:"5px 10px",fontSize:11,fontWeight:600,color:"#2A2420"}}>
+                      + {m.label}
+                      <span style={{opacity:.65}}> · {cal} kcal</span>
+                      {pc&&<span style={{color:"#286028",fontWeight:700}}> · {fmtPrice(pc)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── PrecosTab ─────────────────────────────────────────────────────────────────
-function PrecosTab({ customPrices, setCustomPrices }) {
+function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFoodsList }) {
   const [search, setSearch]     = useState("");
   const [selGroup, setSelGroup] = useState("Todos");
   const [editId, setEditId]     = useState(null);
   const [editVal, setEditVal]   = useState("");
   const [saved, setSaved]       = useState({});
 
-  const groups = ["Todos", ...Array.from(new Set(FOODS.map(f=>f.group)))];
-  const filtered = FOODS
+  // Merge FOODS + customFoodsList into one unified list for display
+  // Custom foods use string ids like "custom_xxx", FOODS use numeric ids
+  const allFoods = [
+    ...FOODS,
+    ...(customFoodsList||[]).map(cf=>({
+      id:       cf.id,
+      name:     cf.name,
+      group:    "Personalizado",
+      color:    "#B8B8B8",
+      price:    cf.price||0,
+      priceDesc:cf.price>0 ? `editado pelo usuário` : "sem preço definido",
+      isUserCreated: true,
+      calPer100: cf.calPer100,
+      measures: cf.measures||[],
+    }))
+  ];
+
+  const groups = ["Todos", ...Array.from(new Set(allFoods.map(f=>f.group)))];
+  const filtered = allFoods
     .filter(f =>
       (selGroup==="Todos"||f.group===selGroup) &&
       f.name.toLowerCase().includes(search.toLowerCase())
@@ -2143,6 +2737,11 @@ function PrecosTab({ customPrices, setCustomPrices }) {
     .sort((a,b) => a.name.localeCompare(b.name, "pt-BR"));
 
   function getP(food) {
+    // For user-created foods, price lives in customFoodsList
+    if(food.isUserCreated) {
+      const cf = (customFoodsList||[]).find(x=>x.id===food.id);
+      return cf?.price||0;
+    }
     if(customPrices[food.id]!==undefined) return customPrices[food.id];
     return food.price||0;
   }
@@ -2150,17 +2749,33 @@ function PrecosTab({ customPrices, setCustomPrices }) {
   function savePrice(food) {
     const v = parseFloat(editVal.replace(",","."));
     if(isNaN(v)||v<0) return;
-    setCustomPrices(prev=>({...prev,[food.id]:v}));
+
+    if(food.isUserCreated) {
+      // Save price inside customFoodsList
+      setCustomFoodsList(prev=>prev.map(cf=>cf.id===food.id?{...cf,price:v}:cf));
+    } else {
+      setCustomPrices(prev=>({...prev,[food.id]:v}));
+    }
     setSaved(prev=>({...prev,[food.id]:true}));
     setTimeout(()=>setSaved(prev=>({...prev,[food.id]:false})),1800);
-    setEditId(null);setEditVal("");
+    setEditId(null); setEditVal("");
   }
 
   function resetPrice(food) {
-    setCustomPrices(prev=>{const n={...prev};delete n[food.id];return n;});
+    if(food.isUserCreated) {
+      setCustomFoodsList(prev=>prev.map(cf=>cf.id===food.id?{...cf,price:0}:cf));
+    } else {
+      setCustomPrices(prev=>{const n={...prev};delete n[food.id];return n;});
+    }
   }
 
-  const editedCount = Object.keys(customPrices).length;
+  function isPriceEdited(food) {
+    if(food.isUserCreated) return ((customFoodsList||[]).find(x=>x.id===food.id)?.price||0)>0;
+    return customPrices[food.id]!==undefined;
+  }
+
+  const editedCount = Object.keys(customPrices).length +
+    (customFoodsList||[]).filter(cf=>(cf.price||0)>0).length;
 
   return (
     <div className="sl" style={{paddingTop:14,display:"flex",flexDirection:"column",gap:12}}>
@@ -2205,32 +2820,41 @@ function PrecosTab({ customPrices, setCustomPrices }) {
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
         {filtered.map(food=>{
           const p = getP(food);
-          const isCustom = customPrices[food.id]!==undefined;
+          const isEdited = isPriceEdited(food);
           const isEditing = editId===food.id;
           const isSaved = saved[food.id];
           return (
-            <div key={food.id} className="card" style={{padding:"0",overflow:"hidden",border:isCustom?"1.5px solid #90C97E":"1px solid #E8E0D0"}}>
+            <div key={food.id} className="card" style={{padding:"0",overflow:"hidden",
+              border:food.isUserCreated?"1.5px solid #C8A07044":isEdited?"1.5px solid #90C97E":"1px solid #E8E0D0"}}>
               {/* Main row */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px 44px",gap:6,padding:"10px 10px",alignItems:"center"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
                   <div style={{width:28,height:28,borderRadius:7,background:food.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>
-                    {GROUP_ICONS[food.group]||"🍴"}
+                    {food.isUserCreated?"✏️":(GROUP_ICONS[food.group]||"🍴")}
                   </div>
                   <div style={{minWidth:0}}>
                     <p style={{fontWeight:600,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{food.name}</p>
-                    <p style={{fontSize:9,color:"#A89878"}}>{food.group}{isCustom?" · editado":""}</p>
+                    <p style={{fontSize:9,color:"#A89878"}}>
+                      {food.group}
+                      {food.isUserCreated&&<span style={{color:"#C8A070",fontWeight:700}}> · personalizado</span>}
+                      {isEdited&&!food.isUserCreated&&<span style={{color:"#286028"}}> · editado</span>}
+                    </p>
                   </div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   {isSaved
                     ? <span style={{fontSize:12,color:"#155724",fontWeight:700}}>✓ Salvo!</span>
-                    : <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:isCustom?"#155724":"#5C3018"}}>
+                    : <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,
+                        color:food.isUserCreated&&p>0?"#C8A070":isEdited?"#155724":"#5C3018"}}>
                         {p>0?`R$ ${p.toFixed(2).replace(".",",")}`:"-"}
                       </span>
                   }
                 </div>
                 <div style={{textAlign:"right",fontSize:9,color:"#A89878",lineHeight:1.4}}>
-                  {food.priceDesc?.split("/")[0]}
+                  {food.isUserCreated
+                    ? <span style={{color:"#C8A070"}}>{food.calPer100} kcal/100g</span>
+                    : food.priceDesc?.split("/")[0]
+                  }
                 </div>
                 <div style={{display:"flex",justifyContent:"center"}}>
                   <button className="btn" onClick={()=>{setEditId(isEditing?null:food.id);setEditVal(p>0?String(p.toFixed(2)).replace(".",","):"");}}
@@ -2243,7 +2867,13 @@ function PrecosTab({ customPrices, setCustomPrices }) {
               {/* Inline editor */}
               {isEditing&&(
                 <div style={{borderTop:"1px solid #EDE5D8",padding:"10px 12px",background:"#F5EFE6",display:"flex",flexDirection:"column",gap:8}}>
-                  <p style={{fontSize:11,color:"#8B7050",fontWeight:700}}>Editar preço por 100g (em reais)</p>
+                  {food.isUserCreated&&(
+                    <p style={{fontSize:11,color:"#C8A070",fontWeight:700}}>
+                      ✏️ Alimento personalizado — {food.calPer100} kcal/100g
+                      {food.measures?.length>0&&` · ${food.measures.length} porção(ões) definida(s)`}
+                    </p>
+                  )}
+                  <p style={{fontSize:11,color:"#8B7050",fontWeight:700}}>Preço por 100g (em reais)</p>
                   <div style={{display:"flex",gap:8,alignItems:"center"}}>
                     <span style={{fontSize:13,color:"#5C3018",fontWeight:700,flexShrink:0}}>R$</span>
                     <input className="inp" type="number" step="0.01" min="0" max="9999" placeholder="Ex: 4,99"
@@ -2257,23 +2887,28 @@ function PrecosTab({ customPrices, setCustomPrices }) {
                     </button>
                   </div>
                   {/* Portion preview */}
-                  {editVal&&!isNaN(parseFloat(editVal.replace(",",".")))&&(
-                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                      {food.measures.map((m,i)=>{
-                        const v=parseFloat(editVal.replace(",","."));
-                        const pc=v*m.g/100;
-                        return(
-                          <span key={i} style={{background:"#E8F5EC",color:"#155724",borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:600}}>
-                            {m.label} → R$ {pc.toFixed(2).replace(".",",")}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {isCustom&&(
+                  {editVal&&!isNaN(parseFloat(editVal.replace(",",".")))&&(()=>{
+                    const measures = food.isUserCreated
+                      ? (food.measures?.length>0 ? food.measures : [{label:"100g",g:100}])
+                      : (FOODS.find(f=>f.id===food.id)?.measures||[]);
+                    return measures.length>0&&(
+                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                        {measures.map((m,i)=>{
+                          const v=parseFloat(editVal.replace(",","."));
+                          const pc=v*m.g/100;
+                          return(
+                            <span key={i} style={{background:"#E8F5EC",color:"#155724",borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:600}}>
+                              {m.label} → R$ {pc.toFixed(2).replace(".",",")}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                  {(isEdited||food.isUserCreated&&p>0)&&(
                     <button className="btn" onClick={()=>{resetPrice(food);setEditId(null);}}
                       style={{background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px",fontSize:11,fontWeight:600}}>
-                      ↩ Restaurar preço original (R$ {(food.price||0).toFixed(2).replace(".",",")}/100g)
+                      ↩ Remover preço
                     </button>
                   )}
                 </div>
@@ -2285,7 +2920,10 @@ function PrecosTab({ customPrices, setCustomPrices }) {
 
       {/* Reset all */}
       {editedCount>0&&(
-        <button className="btn" onClick={()=>setCustomPrices({})}
+        <button className="btn" onClick={()=>{
+          setCustomPrices({});
+          setCustomFoodsList(prev=>prev.map(cf=>({...cf,price:0})));
+        }}
           style={{background:"#FDECEA",color:"#C0392B",borderRadius:10,padding:"11px",fontSize:13,fontWeight:600,border:"1px solid #F4CCCC"}}>
           ↩ Restaurar todos os preços originais ({editedCount} editado{editedCount>1?"s":""})
         </button>
@@ -2510,6 +3148,50 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
 
   const shown = RECEITAS.filter(r => filter==="todos" || r.meal===filter);
 
+  function gerarListaComprasPDF(r) {
+    const total = r.ingredientes.reduce((s,i)=>s+(i.precoRef||0),0);
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Lista de Compras — ${r.name}</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:480px;margin:40px auto;color:#2A2420;padding:20px}
+  h1{font-size:22px;color:#5C3018;margin-bottom:4px}
+  h2{font-size:13px;color:#8B7050;font-weight:normal;margin:0 0 20px}
+  table{width:100%;border-collapse:collapse;margin-top:16px}
+  th{text-align:left;padding:8px 10px;background:#EDE5D8;font-size:12px;color:#5C3018}
+  td{padding:8px 10px;border-bottom:1px dashed #EDE5D8;font-size:13px}
+  .total{font-weight:bold;font-size:14px;color:#286028}
+  .cal{color:#5C3018;font-weight:700}
+  .check{width:20px;height:20px;border:1.5px solid #C8B8A0;display:inline-block;border-radius:4px}
+  .footer{margin-top:24px;font-size:11px;color:#A89878;border-top:1px solid #EDE5D8;padding-top:12px}
+  @media print{body{margin:10px}}
+</style></head><body>
+<h1>🛒 Lista de Compras</h1>
+<h2>${r.name} · ${r.cal} kcal · ${r.tempo}</h2>
+<table>
+  <thead><tr><th></th><th>Ingrediente</th><th>Quantidade</th><th>Custo est.</th></tr></thead>
+  <tbody>
+  ${r.ingredientes.map(ing=>`<tr>
+    <td><span class="check"></span></td>
+    <td>${ing.item}</td>
+    <td style="color:#8B7050;font-size:12px">${ing.q}</td>
+    <td class="cal">R$ ${(ing.precoRef||0).toFixed(2).replace(".",",")}</td>
+  </tr>`).join("")}
+  <tr style="background:#F5EFE6">
+    <td colspan="3" class="total">Total estimado</td>
+    <td class="total" style="color:#286028">R$ ${total.toFixed(2).replace(".",",")}</td>
+  </tr>
+  </tbody>
+</table>
+<p class="footer">
+  📖 Receita: ${r.fonte||r.name}<br>
+  💡 ${r.dica}<br><br>
+  Gerado pelo Dieta Diária App · ${new Date().toLocaleDateString("pt-BR")}
+</p>
+</body></html>`;
+    const win = window.open("","_blank");
+    if(win){ win.document.write(html); win.document.close(); win.print(); }
+  }
+
   function importarReceita(r) {
     if(!addItem) return;
     const mealDef = MEALS_REF.find(m=>m.id===r.meal);
@@ -2517,7 +3199,6 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
       const food = FOODS.find(f=>f.id===it.foodId);
       if(!food) return;
       const measure = food.measures[it.measureIndex] || food.measures[0];
-      // stagger ids to avoid collision
       setTimeout(()=>addItem(food, measure, r.meal), idx*5);
     });
     setImported(p=>({...p,[r.id]:true}));
@@ -2635,6 +3316,11 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
                     : <><span>📥</span> Importar para o Cardápio — {r.mealLabel}</>
                   }
                 </button>
+                {/* PDF Shopping list */}
+                <button className="btn" onClick={()=>gerarListaComprasPDF(r)}
+                  style={{background:"#F5EFE6",border:"1.5px solid #C8B8A0",color:"#5C3018",borderRadius:12,padding:"11px",fontSize:13,fontWeight:700,width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:4}}>
+                  🛒 Gerar Lista de Compras (PDF)
+                </button>
               </div>
             )}
           </div>
@@ -2645,23 +3331,28 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
 }
 
 // ── MacroTotalsRow ────────────────────────────────────────────────────────────
-function MacroTotalsRow({ items }) {
-  let tP=0,tC=0,tF=0;
+function MacroTotalsRow({ items, customFoodsList }) {
+  let tP=0,tC=0,tF=0,tCalCustom=0;
   items.forEach(it=>{
-    const fd=FOODS.find(f=>f.id===it.foodId);
-    if(!fd||!fd.macro) return;
     const q=it.qty||1;
-    tP+=fd.macro.p*it.grams/100*q;
-    tC+=fd.macro.c*it.grams/100*q;
-    tF+=fd.macro.f*it.grams/100*q;
+    const macro=resolveMacro(it,customFoodsList);
+    if(!macro){ if(it.isCustom) tCalCustom+=it.cal*q; return; }
+    tP+=macro.p*it.grams/100*q;
+    tC+=macro.c*it.grams/100*q;
+    tF+=macro.f*it.grams/100*q;
   });
-  if(tP+tC+tF<1) return null;
+  const hasMacros = tP+tC+tF>=1;
+  const hasCustom = tCalCustom>0;
+  if(!hasMacros && !hasCustom) return null;
   return(
-    <div style={{display:"flex",gap:8,padding:"7px 4px 2px",borderTop:"1px solid #EDE5D8",marginTop:2}}>
+    <div style={{display:"flex",gap:8,padding:"7px 4px 2px",borderTop:"1px solid #EDE5D8",marginTop:2,flexWrap:"wrap"}}>
       <span style={{fontSize:10,color:"#8B7050",fontWeight:600}}>Macros:</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#C97B5A"}}>Prot. {Math.round(tP)}g</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#A08040"}}>Carb. {Math.round(tC)}g</span>
-      <span style={{fontSize:10,fontWeight:700,color:"#4A8050"}}>Gord. {Math.round(tF)}g</span>
+      {hasMacros&&<>
+        <span style={{fontSize:10,fontWeight:700,color:"#C97B5A"}}>Prot. {Math.round(tP)}g</span>
+        <span style={{fontSize:10,fontWeight:700,color:"#A08040"}}>Carb. {Math.round(tC)}g</span>
+        <span style={{fontSize:10,fontWeight:700,color:"#4A8050"}}>Gord. {Math.round(tF)}g</span>
+      </>}
+      {hasCustom&&<span style={{fontSize:10,fontWeight:700,color:"#8B7050"}}>+{tCalCustom} kcal (personalizados s/ macro)</span>}
     </div>
   );
 }
@@ -2762,18 +3453,33 @@ function SubstituicoesContent({ subTarget, subResults, subMode, setSubMode, subS
 }
 
 // ── Meal Macro Pie Chart ──────────────────────────────────────────────────────
-function MealPieChart({ items }) {
-  let totP=0, totC=0, totF=0;
+function MealPieChart({ items, customFoodsList }) {
+  let totP=0, totC=0, totF=0, totCalCustom=0;
   items.forEach(item=>{
-    const food=FOODS.find(f=>f.id===item.foodId);
-    if(!food||!food.macro) return;
-    const q=item.qty||1, g=item.grams;
-    totP += food.macro.p * g/100 * q;
-    totC += food.macro.c * g/100 * q;
-    totF += food.macro.f * g/100 * q;
+    const q=item.qty||1;
+    const macro=resolveMacro(item,customFoodsList);
+    if(!macro){ if(item.isCustom) totCalCustom+=item.cal*q; return; }
+    const g=item.grams;
+    totP += macro.p * g/100 * q;
+    totC += macro.c * g/100 * q;
+    totF += macro.f * g/100 * q;
   });
   const total = totP+totC+totF;
-  if(total<1) return null;
+  // If only custom foods (no macro data), show a simple kcal badge
+  if(total<1) {
+    if(totCalCustom<1) return null;
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+        <div style={{width:36,height:36,borderRadius:"50%",background:"#EDE5D8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#8B7050",textAlign:"center",lineHeight:1.2}}>
+          ✏️
+        </div>
+        <div style={{fontSize:9,lineHeight:1.5}}>
+          <div style={{color:"#8B7050",fontWeight:700}}>{totCalCustom}</div>
+          <div style={{color:"#A89878"}}>kcal</div>
+        </div>
+      </div>
+    );
+  }
   const pP=totP/total, pC=totC/total, pF=totF/total;
   const size=44, r=18, cx=22, cy=22;
   function slice(pct, start) {
@@ -2803,17 +3509,27 @@ function MealPieChart({ items }) {
 }
 
 // ── Nutrient Analysis Component ───────────────────────────────────────────────
-function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos }) {
+function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos, customFoodsList }) {
   const groupsPresent = new Set(menu.map(i => i.group));
 
-  // Calculate total protein consumed
-  const totalProteinG = menu.reduce((sum, item) => {
-    const food = FOODS.find(f => f.id === item.foodId);
-    if (!food || !food.macro) return sum;
-    return sum + food.macro.p * item.grams / 100 * (item.qty||1);
-  }, 0);
+  // Calculate total macros consumed
+  let totalProteinG=0, totalCarbG=0, totalFatG=0;
+  menu.forEach(item => {
+    const macro = resolveMacro(item, customFoodsList);
+    if (!macro) return;
+    const q = item.qty||1, g = item.grams;
+    totalProteinG += macro.p * g/100 * q;
+    totalCarbG    += macro.c * g/100 * q;
+    totalFatG     += macro.f * g/100 * q;
+  });
+  totalProteinG = Math.round(totalProteinG);
+  totalCarbG    = Math.round(totalCarbG);
+  totalFatG     = Math.round(totalFatG);
+
   const proteinGoalG = weight > 0 ? weight * 2 : null;
   const proteinOk = proteinGoalG ? totalProteinG >= proteinGoalG * 0.85 : true;
+  const carbGoal  = Math.round(dailyGoal * 0.5 / 4);
+  const fatGoal   = Math.round(dailyGoal * 0.3 / 9);
   const checks = [
     {
       key:"proteina", label:"Proteina", icon:"🥩",
@@ -2955,6 +3671,40 @@ function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos }
           </button>
         </div>
       )}
+
+      {/* Macro totals summary — always shown */}
+      <div style={{marginTop:14,borderTop:"1px solid #EDE5D8",paddingTop:12}}>
+        <p style={{fontSize:11,fontWeight:700,color:"#8B7050",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Total de Macronutrientes do Dia</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          {[
+            {label:"Proteína",val:totalProteinG,goal:proteinGoalG,color:"#C97B5A",unit:"g"},
+            {label:"Carboidrato",val:totalCarbG,goal:carbGoal,color:"#C8A840",unit:"g"},
+            {label:"Gordura",val:totalFatG,goal:fatGoal,color:"#4A8050",unit:"g"},
+          ].map(({label,val,goal,color,unit})=>{
+            const pct = goal ? Math.round(val/goal*100) : null;
+            const ok = pct && pct>=85 && pct<=115;
+            return(
+              <div key={label} style={{background:color+"15",border:`1px solid ${color}44`,borderRadius:10,padding:"8px 10px",textAlign:"center"}}>
+                <p style={{fontSize:10,color:"#8B7050",marginBottom:4}}>{label}</p>
+                <p style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color}}>{val}{unit}</p>
+                {goal&&<p style={{fontSize:9,color:ok?"#286028":"#856404",marginTop:2}}>meta {goal}{unit} · {pct}%</p>}
+              </div>
+            );
+          })}
+        </div>
+        {proteinGoalG&&!proteinOk&&(
+          <div style={{marginTop:8,background:"#FFF3CD",border:"1px solid #FFD966",borderRadius:8,padding:"8px 12px"}}>
+            <p style={{fontSize:12,color:"#856404"}}>
+              🥩 Meta de proteína: faltam <strong>{Math.round(proteinGoalG-totalProteinG)}g</strong> ({Math.round(proteinGoalG)}g necessários · 2g/kg × {weight}kg)
+            </p>
+          </div>
+        )}
+        {proteinGoalG&&proteinOk&&(
+          <div style={{marginTop:8,background:"#F0FAF2",border:"1px solid #90C97E",borderRadius:8,padding:"8px 12px"}}>
+            <p style={{fontSize:12,color:"#155724"}}>✅ Meta de proteína atingida! {totalProteinG}g / {Math.round(proteinGoalG)}g</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
