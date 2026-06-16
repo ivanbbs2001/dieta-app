@@ -1,13 +1,74 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>dieta-app</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <title>Dieta Diária</title>
+    <meta name="description" content="Controle de calorias e macronutrientes" />
+
+    <!-- ─── PWA / Web App Manifest ─────────────────────────────────────── -->
+    <link rel="manifest" href="/dieta-app/manifest.json" />
+
+    <!-- ─── iOS Safari — comportamento de app nativo ──────────────────── -->
+    <!-- Diz ao Safari para exibir como app fullscreen ao ser adicionado -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Estilo da status bar (black-translucent = barra transparente sobre o app) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Nome que aparece embaixo do ícone na tela inicial -->
+    <meta name="apple-mobile-web-app-title" content="Dieta" />
+
+    <!-- ─── iOS — ícones para tela inicial (Apple Touch Icons) ────────── -->
+    <link rel="apple-touch-icon" href="/dieta-app/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="72x72"   href="/dieta-app/icons/icon-72x72.png" />
+    <link rel="apple-touch-icon" sizes="96x96"   href="/dieta-app/icons/icon-96x96.png" />
+    <link rel="apple-touch-icon" sizes="128x128" href="/dieta-app/icons/icon-128x128.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/dieta-app/icons/icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/dieta-app/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/dieta-app/icons/icon-192x192.png" />
+
+    <!-- ─── Cor do tema (barra do navegador no Android / PWA) ─────────── -->
+    <meta name="theme-color" content="#22c55e" />
+
+    <!-- ─── Favicon padrão ────────────────────────────────────────────── -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/dieta-app/icons/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/dieta-app/icons/icon-512x512.png" />
+
+    <!-- ─── iOS safe area: garante que o conteúdo não fique atrás do notch ── -->
+    <style>
+      :root {
+        --safe-top:    env(safe-area-inset-top,    0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left:   env(safe-area-inset-left,   0px);
+        --safe-right:  env(safe-area-inset-right,  0px);
+      }
+      body {
+        padding-top:    var(--safe-top);
+        padding-bottom: var(--safe-bottom);
+        padding-left:   var(--safe-left);
+        padding-right:  var(--safe-right);
+        margin: 0;
+        background: #161616;
+      }
+      /* Previne bounce/overscroll do iOS fora do app */
+      html { overflow: hidden; height: 100%; }
+      body { overflow: auto; height: 100%; -webkit-overflow-scrolling: touch; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- ─── Registro do Service Worker ────────────────────────────────── -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/dieta-app/sw.js")
+            .then((reg) => console.log("[SW] Registrado:", reg.scope))
+            .catch((err) => console.error("[SW] Erro:", err));
+        });
+      }
+    </script>
   </body>
 </html>

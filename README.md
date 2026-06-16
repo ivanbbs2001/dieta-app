@@ -1,18 +1,39 @@
-# React + Vite
+# Dieta — PWA para iOS
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## O que foi adicionado
 
-Currently, two official plugins are available:
+| Arquivo | O que faz |
+|---|---|
+| `public/manifest.json` | Registra o app: nome, ícones, cor, modo fullscreen |
+| `public/sw.js` | Service worker: cache offline para assets estáticos |
+| `public/icons/` | Ícones em 8 tamanhos (72px → 512px) |
+| `index.html` | Meta tags iOS + registro do service worker |
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Como aplicar no seu projeto
 
-## React Compiler
+1. **Copie os arquivos** desta pasta para o seu projeto:
+   - `public/manifest.json` → `public/manifest.json`
+   - `public/sw.js`         → `public/sw.js`
+   - `public/icons/`        → `public/icons/`
+   - Substitua seu `index.html` pelo deste zip
+   - Substitua seu `vite.config.js` pelo deste zip (se necessário)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. **Faça o deploy**:
+   ```bash
+   npm run build
+   npm run deploy
+   # ou: gh-pages -d dist
+   ```
 
-## Expanding the ESLint configuration
+3. **No iPhone** (Safari):
+   - Acesse a URL do seu app (ex: `https://seu-user.github.io/dieta-app/`)
+   - Toque no ícone de compartilhar **⎙**
+   - Toque em **"Adicionar à Tela de Início"**
+   - Confirme
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-# dieta-app
-# dieta-app
+Pronto: o ícone aparece na tela inicial, abre sem barra do Safari, em modo fullscreen, e funciona offline.
+
+## Notas iOS
+- Safari no iOS exige HTTPS para service workers — o GitHub Pages já usa HTTPS por padrão.
+- O splash screen automático do iOS usa o `background_color` do manifest (#161616) + o ícone apple-touch-icon.
+- O `status-bar-style: black-translucent` permite que o conteúdo rode atrás da status bar — as variáveis `--safe-top/bottom` no CSS compensam isso.

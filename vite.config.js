@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/dieta-app/',  // nome do seu repositório GitHub
+  base: '/dieta-app/',
 })
