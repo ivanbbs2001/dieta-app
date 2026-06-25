@@ -1478,38 +1478,37 @@ RESPONDA SOMENTE JSON VALIDO:
               <div className="card" style={{padding:"16px"}}>
                 <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:12}}>Seu Metabolismo</p>
 
-                {/* TMB row with edit */}
-                <div className="stat-row" style={{alignItems:"flex-start",flexDirection:"column",gap:8}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
-                    <span style={{fontSize:13,color:"#5C4020"}}>🔥 TMB (repouso total)</span>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,color:currentBmrManual?"#8B5E3C":"#2C1A0E"}}>{effectiveBmr}</span>
-                      <span style={{fontSize:11,color:"#8B7050"}}>kcal/dia</span>
-                      {currentBmrManual&&<span style={{fontSize:9,background:"#FFF3CD",color:"#856404",padding:"1px 6px",borderRadius:8,fontWeight:700}}>manual</span>}
-                    </div>
+                {/* TMB row */}
+                <div className="stat-row">
+                  <span style={{fontSize:13,color:"#5C4020"}}>🔥 TMB (repouso total)</span>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,color:currentBmrManual?"#8B5E3C":"#2C1A0E"}}>{effectiveBmr}</span>
+                    <span style={{fontSize:11,color:"#8B7050"}}>kcal/dia</span>
+                    {currentBmrManual&&<span style={{fontSize:9,background:"#FFF3CD",color:"#856404",padding:"1px 6px",borderRadius:8,fontWeight:700}}>manual</span>}
                   </div>
-                  {bmr&&currentBmrManual&&(
-                    <p style={{fontSize:11,color:"#A89878"}}>Calculado pela fórmula: {bmr} kcal/dia</p>
+                </div>
+                {bmr&&currentBmrManual&&(
+                  <p style={{fontSize:11,color:"#A89878",padding:"0 0 6px"}}>Calculado pela fórmula: {bmr} kcal/dia</p>
+                )}
+
+                {/* BMR editor — fora do stat-row para não ser clipado */}
+                <div style={{background:"#F5EFE6",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
+                  <p style={{fontSize:11,fontWeight:700,color:"#5C3018",marginBottom:6}}>
+                    ✏️ Editar TMB de repouso <span style={{fontWeight:400,color:"#8B7050"}}>— útil se tiver medição por bioimpedância</span>
+                  </p>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input className="inp" type="number" min="800" max="5000"
+                      placeholder={`Fórmula: ${bmr||"preencha os dados acima"} kcal`}
+                      value={currentBmrManual??""} onChange={e=>setCurrentBmrManual(e.target.value?+e.target.value:null)}
+                      style={{flex:1,padding:"8px 12px",fontSize:14}}/>
+                    <span style={{fontSize:12,color:"#8B7050",flexShrink:0}}>kcal/dia</span>
+                  </div>
+                  {currentBmrManual&&(
+                    <button className="btn" onClick={()=>setCurrentBmrManual(null)}
+                      style={{marginTop:6,width:"100%",background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:600}}>
+                      ↩ Usar valor calculado pela fórmula ({bmr} kcal/dia)
+                    </button>
                   )}
-                  {/* Inline BMR editor */}
-                  <div style={{width:"100%",background:"#F5EFE6",borderRadius:10,padding:"10px 12px"}}>
-                    <p style={{fontSize:11,fontWeight:700,color:"#5C3018",marginBottom:6}}>
-                      Editar TMB de repouso <span style={{fontWeight:400,color:"#8B7050"}}>— útil se você tem medição por bioimpedância ou calorimetria indireta</span>
-                    </p>
-                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                      <input className="inp" type="number" min="800" max="5000"
-                        placeholder={`Fórmula: ${bmr||"preencha os dados acima"} kcal`}
-                        value={currentBmrManual??""} onChange={e=>setCurrentBmrManual(e.target.value?+e.target.value:null)}
-                        style={{flex:1,padding:"8px 12px",fontSize:14}}/>
-                      <span style={{fontSize:12,color:"#8B7050",flexShrink:0}}>kcal/dia</span>
-                      {currentBmrManual&&(
-                        <button className="btn" onClick={()=>setCurrentBmrManual(null)}
-                          style={{background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:600,flexShrink:0}}>
-                          ↩ Usar fórmula
-                        </button>
-                      )}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="stat-row"><span style={{fontSize:13,color:"#5C4020"}}>⚡ TDEE (com atividade)</span><span><span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>{tdee}</span><span style={{fontSize:11,color:"#8B7050",marginLeft:3}}>kcal/dia</span></span></div>
