@@ -25,6 +25,16 @@ const MEALS = [
   { id:"ceia",    label:"Ceia",             icon:"🌛", time:"22:00", cooked:false },
 ];
 
+const MEALS_TREINO = [
+  { id:"cafe",      label:"Cafe da Manha",   icon:"☕", time:"07:00", cooked:false },
+  { id:"lanche1",   label:"Lanche da Manha", icon:"🍎", time:"10:00", cooked:false },
+  { id:"almoco",    label:"Almoco",           icon:"🍽️", time:"12:30", cooked:true  },
+  { id:"pretreino", label:"Pre-Treino",       icon:"💪", time:"17:00", cooked:false, isTreino:true },
+  { id:"postreino", label:"Pos-Treino",       icon:"🥛", time:"19:00", cooked:false, isTreino:true },
+  { id:"jantar",    label:"Jantar",           icon:"🌙", time:"20:30", cooked:true  },
+  { id:"ceia",      label:"Ceia",             icon:"🌛", time:"22:00", cooked:false },
+];
+
 const ACTIVITY_LEVELS = [
   { id:"sed",   label:"Sedentario",          desc:"Pouco ou nenhum exercicio",      mult:1.2   },
   { id:"light", label:"Levemente ativo",      desc:"Exercicio leve 1-3x/sem",        mult:1.375 },
@@ -315,19 +325,40 @@ const GROUP_ICONS = {
   "Bebida":"☕","Personalizado":"✏️","Condimento":"🫙","Lanche":"🫓"
 };
 
-function calcCal(food, grams, cooked) {
-  return Math.round(((cooked ? food.cookedCal : food.rawCal) * grams) / 100);
+function calcCal(food, grams, cooked, customMacros) {
+  const cal = getEffectiveCal(food, cooked, customMacros);
+  return Math.round((cal * grams) / 100);
 }
 function getEffectivePrice(food, customPrices) {
   if(customPrices && customPrices[food.id] !== undefined) return customPrices[food.id];
   return food.price || 0;
 }
 
+// Override cal/macro for a standard food if user has edited it
+function getEffectiveCal(food, cooked, customMacros) {
+  const ov = customMacros && customMacros[food.id];
+  if(ov && ov.cal != null) return ov.cal;
+  return cooked ? food.cookedCal : food.rawCal;
+}
+function getEffectiveMacroForFood(food, customMacros) {
+  const ov = customMacros && customMacros[food.id];
+  if(!ov && !food.macro) return null;
+  const base = food.macro || {};
+  return {
+    p:  ov?.p  != null ? ov.p  : (base.p  || 0),
+    c:  ov?.c  != null ? ov.c  : (base.c  || 0),
+    f:  ov?.f  != null ? ov.f  : (base.f  || 0),
+    fi: base.fi || 0, su: base.su || 0,
+    na: base.na || 0, k:  base.k  || 0, ch: base.ch || 0,
+  };
+}
+
 // Resolve macro for a menu item (handles both FOODS and custom foods)
-function resolveMacro(item, customFoodsList) {
+function resolveMacro(item, customFoodsList, customMacros) {
   if(!item.isCustom) {
     const food = FOODS.find(f=>f.id===item.foodId);
-    return food?.macro || null;
+    if(!food) return null;
+    return getEffectiveMacroForFood(food, customMacros);
   }
   // Custom food — look up macro in customFoodsList
   const cf = (customFoodsList||[]).find(x=>x.name===item.name);
@@ -384,8 +415,8 @@ function exportPDF(menu, totalCal, dailyGoal, profile) {
   win.document.close();
 }
 
-function exportJSON(menu, profile, dailyGoal, customPrices) {
-  const blob = new Blob([JSON.stringify({ version:2, exportedAt:new Date().toISOString(), menu, profile, dailyGoal, customPrices }, null, 2)], { type:"application/json" });
+function exportJSON(menu, profile, dailyGoal, customPrices, customMacros) {
+  const blob = new Blob([JSON.stringify({ version:2, exportedAt:new Date().toISOString(), menu, profile, dailyGoal, customPrices, customMacros }, null, 2)], { type:"application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = `dieta-backup-${new Date().toISOString().split("T")[0]}.json`; a.click();
 }
@@ -396,7 +427,10 @@ export default function DietaTracker() {
   const [activeProfile, setActiveProfile] = useState("ivan"); // "ivan" | "ju"
   const [menu, setMenu]             = useState([]);
   const [menuJu, setMenuJu]         = useState([]);
+  const [menuTreino, setMenuTreino] = useState([]);     // Ivan treino
+  const [menuJuTreino, setMenuJuTreino] = useState([]); // Ju treino
   const [menuLixo, setMenuLixo]     = useState([]);
+  const [modoDia, setModoDia]       = useState("normal"); // "normal" | "treino"
   const [fbLoaded, setFbLoaded]     = useState(false);
   const [fbSaving, setFbSaving]     = useState(false);
   const [fbError,  setFbError]      = useState(null);
@@ -413,6 +447,7 @@ export default function DietaTracker() {
   const [breadToast, setBreadToast] = useState(null);
   const [lastAdded, setLastAdded]   = useState(null);
   const [customFood, setCustomFood] = useState(null);
+  const [quickEditFood, setQuickEditFood] = useState(null); // {food, cal, p, c, f} for quick macro edit
   const [confirmDeleteFood, setConfirmDeleteFood] = useState(null); // id to confirm deletion
   const [customFoodsList, setCustomFoodsList] = useState([]); // saved custom foods shown in Alimentos
   const [history, setHistory]       = useState({}); // { "YYYY-MM-DD": {menu, totalCal} }
@@ -420,7 +455,7 @@ export default function DietaTracker() {
   function todayKey() { return new Date().toISOString().split("T")[0]; }
   function saveDay() {
     const key = todayKey();
-    setHistory(prev => ({...prev, [key]: { menu: [...currentMenu], totalCal }}));
+    setHistory(prev => ({...prev, [key]: { menu: [...currentMenu], totalCal, mode:modoDia }}));
     showToast("Dia salvo no histórico!");
   }
   const [editItemId, setEditItemId] = useState(null);
@@ -429,14 +464,24 @@ export default function DietaTracker() {
 
   const [profile, setProfile]            = useState({ nome:"Ivan", sex:"M", age:"", weight:"", height:"", activity:"mod", goal:"lose_mod" });
   const [dailyGoalManual, setDailyGoalManual] = useState(null);
+  const [bmrManual, setBmrManual]             = useState(null); // Ivan manual BMR override
   // Perfil JU (secundário)
   const [profileJu, setProfileJu]        = useState({ nome:"Ju", sex:"F", age:"", weight:"", height:"", activity:"mod", goal:"lose_mod" });
   const [dailyGoalManualJu, setDailyGoalManualJu] = useState(null);
+  const [bmrManualJu, setBmrManualJu]             = useState(null); // Ju manual BMR override
   const [customPrices, setCustomPrices]  = useState({});
+  const [customMacros, setCustomMacros]  = useState({}); // { foodId: {cal,p,c,f} }
 
   // Active computed values — switch based on activeProfile
-  const currentMenu       = activeProfile==="ju" ? menuJu    : menu;
-  const setCurrentMenu    = activeProfile==="ju" ? setMenuJu : setMenu;
+  // Active menu depends on both profile and day mode
+  const currentMenu = modoDia==="treino"
+    ? (activeProfile==="ju" ? menuJuTreino : menuTreino)
+    : (activeProfile==="ju" ? menuJu : menu);
+  const setCurrentMenu = modoDia==="treino"
+    ? (activeProfile==="ju" ? setMenuJuTreino : setMenuTreino)
+    : (activeProfile==="ju" ? setMenuJu : setMenu);
+  // Active meals list
+  const ACTIVE_MEALS = modoDia==="treino" ? MEALS_TREINO : MEALS;
   const currentProfile    = activeProfile==="ju" ? profileJu : profile;
   const setCurrentProfile = activeProfile==="ju" ? setProfileJu : setProfile;
   const currentGoalManual = activeProfile==="ju" ? dailyGoalManualJu : dailyGoalManual;
@@ -450,14 +495,19 @@ export default function DietaTracker() {
         const d = snap.data();
         if (d.menu)           setMenu(d.menu);
         if (d.menuJu)         setMenuJu(d.menuJu);
+        if (d.menuTreino)    setMenuTreino(d.menuTreino||[]);
+        if (d.menuJuTreino) setMenuJuTreino(d.menuJuTreino||[]);
         if (d.menuLixo)       setMenuLixo(d.menuLixo);
         if (d.profile)        setProfile(d.profile);
         if (d.profileJu)      setProfileJu(d.profileJu);
         if (d.dailyGoalIvan)  setDailyGoalManual(d.dailyGoalIvan);
         if (d.dailyGoalJu)    setDailyGoalManualJu(d.dailyGoalJu);
+        if (d.bmrManual)      setBmrManual(d.bmrManual);
+        if (d.bmrManualJu)   setBmrManualJu(d.bmrManualJu);
         // legacy key migration
         if (!d.dailyGoalIvan && d.dailyGoal) setDailyGoalManual(d.dailyGoal);
         if (d.customPrices)   setCustomPrices(d.customPrices);
+        if (d.customMacros)   setCustomMacros(d.customMacros);
         if (d.customFoodsList) setCustomFoodsList(d.customFoodsList);
         if (d.history)        setHistory(d.history);
       }
@@ -492,9 +542,13 @@ export default function DietaTracker() {
   const [sugStep, setSugStep]           = useState("form");
   const [sugCopied, setSugCopied]       = useState(false);
 
+  const currentBmrManual    = activeProfile==="ju" ? bmrManualJu    : bmrManual;
+  const setCurrentBmrManual = activeProfile==="ju" ? setBmrManualJu : setBmrManual;
+
   const bmr  = calcBMR(currentProfile.sex, +currentProfile.age, +currentProfile.weight, +currentProfile.height);
+  const effectiveBmr = currentBmrManual ?? bmr; // use manual override if set
   const act  = ACTIVITY_LEVELS.find(a=>a.id===currentProfile.activity)?.mult || 1.55;
-  const tdee = bmr ? Math.round(bmr * act) : null;
+  const tdee = effectiveBmr ? Math.round(effectiveBmr * act) : null;
   const goalDelta = GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.delta || -500;
   const derivedGoal = tdee ? Math.max(1200, tdee+goalDelta) : 2000;
   const dailyGoal = currentGoalManual ?? derivedGoal;
@@ -507,11 +561,12 @@ export default function DietaTracker() {
       try {
         setFbSaving(true);
         await setDoc(doc(db, USER_DOC), {
-          menu, menuJu, menuLixo,
+          menu, menuJu, menuTreino, menuJuTreino, menuLixo,
           profile, profileJu,
           dailyGoalIvan: dailyGoalManual,
           dailyGoalJu:   dailyGoalManualJu,
-          customPrices, customFoodsList, history,
+          bmrManual, bmrManualJu,
+          customPrices, customMacros, customFoodsList, history,
           updatedAt: new Date().toISOString(),
         });
         setFbSaving(false);
@@ -520,7 +575,7 @@ export default function DietaTracker() {
         setFbError("Erro ao salvar na nuvem.");
       }
     }, 1500);
-  }, [menu, menuJu, menuLixo, profile, profileJu, dailyGoalManual, dailyGoalManualJu, customPrices, customFoodsList, history, fbLoaded]);
+  }, [menu, menuJu, menuTreino, menuJuTreino, menuLixo, profile, profileJu, dailyGoalManual, dailyGoalManualJu, bmrManual, bmrManualJu, customPrices, customMacros, customFoodsList, history, fbLoaded]);
 
   const groups   = ["Todos", ...Array.from(new Set(FOODS.map(f=>f.group)))];
   const filtered = useMemo(()=>FOODS.filter(f=>
@@ -530,7 +585,7 @@ export default function DietaTracker() {
   // Use currentMenu for all downstream logic
   const menu_active = currentMenu;
   const totalCal = useMemo(()=>currentMenu.reduce((s,i)=>s+i.cal*(i.qty||1),0),[currentMenu]);
-  const mealCals = useMemo(()=>{const o={};MEALS.forEach(m=>{o[m.id]=currentMenu.filter(i=>i.mealId===m.id).reduce((s,i)=>s+i.cal*(i.qty||1),0)});return o;},[currentMenu]);
+  const mealCals = useMemo(()=>{const o={};ACTIVE_MEALS.forEach(m=>{o[m.id]=currentMenu.filter(i=>i.mealId===m.id).reduce((s,i)=>s+i.cal*(i.qty||1),0)});return o;},[currentMenu]);
   const pct=Math.min(100,Math.round((totalCal/dailyGoal)*100));
   const barColor=pct<70?"#6AAF6E":pct<97?"#E8A030":"#D04040";
 
@@ -538,7 +593,7 @@ export default function DietaTracker() {
   function updateProfile(k,v){setCurrentProfile(p=>({...p,[k]:v}));}
 
   function addItem(food,measure,mealId){
-    const meal=MEALS.find(m=>m.id===mealId);
+    const meal=ACTIVE_MEALS.find(m=>m.id===mealId);
     const isBread = [12,45,46].includes(food.id);
     setCurrentMenu(prev=>[...prev,{id:Date.now(),mealId,foodId:food.id,name:food.name,measure:measure.label,grams:measure.g,cal:calcCal(food,measure.g,meal.cooked),color:food.color,group:food.group,cooked:meal.cooked,qty:1}]);
     setAddModal(null);
@@ -583,7 +638,7 @@ export default function DietaTracker() {
     const g = parseInt(grams);
     if (g && g>=1 && mealId) {
       const cal = Math.round(c100 * g / 100);
-      const meal = MEALS.find(m=>m.id===mealId);
+      const meal = ACTIVE_MEALS.find(m=>m.id===mealId);
       setCurrentMenu(prev=>[...prev,{
         id:Date.now(), mealId, foodId:null, name:name.trim(),
         measure:`${g}g`, grams:g, cal, color:"#B8B8B8",
@@ -644,7 +699,7 @@ export default function DietaTracker() {
   }
   function handleImport(e){
     const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.menu)setCurrentMenu(d.menu);if(d.profile)setCurrentProfile(d.profile);if(d.dailyGoal)setCurrentGoalManual(d.dailyGoal);if(d.customPrices)setCustomPrices(d.customPrices);showToast("Backup importado!");}catch{showToast("Arquivo invalido.","err");}};
+    const reader=new FileReader();reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.menu)setCurrentMenu(d.menu);if(d.profile)setCurrentProfile(d.profile);if(d.dailyGoal)setCurrentGoalManual(d.dailyGoal);if(d.customPrices)setCustomPrices(d.customPrices);if(d.customMacros)setCustomMacros(d.customMacros);showToast("Backup importado!");}catch{showToast("Arquivo invalido.","err");}};
     reader.readAsText(file);e.target.value="";
   }
 
@@ -653,7 +708,7 @@ export default function DietaTracker() {
     if(!genIngredients.trim()){setGenError("Informe ao menos um ingrediente.");return;}
     setGenLoading(true);setGenError("");setGenResult(null);
     const catalog=FOODS.map(f=>({id:f.id,name:f.name,group:f.group,kcalCozido:f.cookedCal,kcalCru:f.rawCal,porcoes:f.measures.map((m,i)=>({index:i,label:m.label,g:m.g}))}));
-    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica: ${dailyGoal} kcal.`;
+    const userCtx=bmr?`TMB: ${effectiveBmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica: ${dailyGoal} kcal.`;
     const prompt=`Voce e um nutricionista brasileiro criando um cardapio diario pratico.\n\nCONTEXTO: ${userCtx}${currentProfile.nome?` Nome: ${currentProfile.nome}.`:""}\n\nINGREDIENTES DISPONIVEIS (almoco/jantar):\n${genIngredients}\n\nPREFERENCIAS:\n${genPrefs||"Nenhuma."}\n\nCATALOGO (use APENAS estes IDs):\n${JSON.stringify(catalog)}\n\nINSTRUCOES:\n- 6 refeicoes: cafe, lanche1, almoco, lanche2, jantar, ceia\n- Use os ingredientes informados no almoco e jantar\n- Total de kcal entre 90%-105% de ${dailyGoal} kcal\n- Almoco/jantar: proteina + carbo + vegetal\n- Use somente foodId e measureIndex do catalogo\n\nRESPONDA SOMENTE JSON:\n{"meals":[{"mealId":"cafe","items":[{"foodId":4,"measureIndex":1}]}],"totalCalEstimado":1800,"notes":"dica breve"}`;
     try{
       const response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
@@ -678,7 +733,7 @@ export default function DietaTracker() {
   async function generateSuggestion(){
     setSugLoading(true);setSugError("");setSugResult(null);
     const catalog=FOODS.map(f=>({id:f.id,name:f.name,group:f.group,kcalCozido:f.cookedCal,porcoes:f.measures.map((m,i)=>({index:i,label:m.label,g:m.g}))}));
-    const userCtx=bmr?`TMB: ${bmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica diaria: ${dailyGoal} kcal.`;
+    const userCtx=bmr?`TMB: ${effectiveBmr} kcal. TDEE: ${tdee} kcal. Meta: ${dailyGoal} kcal. Objetivo: ${GOAL_OPTIONS.find(g=>g.id===currentProfile.goal)?.label}.`:`Meta calorica diaria: ${dailyGoal} kcal.`;
     const cookMealLabel={almoco:"apenas o almoco",jantar:"apenas o jantar",ambos:"almoco e jantar",nenhum:"nenhuma refeicao quente"};
     const prompt=`Voce e um nutricionista e personal chef brasileiro. Crie um planejamento diario completo.
 
@@ -804,6 +859,18 @@ RESPONDA SOMENTE JSON VALIDO:
               </button>
             ))}
           </div>
+          {/* Day mode toggle */}
+          <div style={{display:"flex",gap:6}}>
+            {[["normal","📋 Dia Normal"],["treino","🏋️ Dia de Treino"]].map(([id,label])=>(
+              <button key={id} className="btn" onClick={()=>setModoDia(id)}
+                style={{padding:"5px 14px",borderRadius:20,fontSize:12,fontWeight:700,
+                  background:modoDia===id?"rgba(255,255,255,.25)":"rgba(255,255,255,.08)",
+                  color:modoDia===id?"#FFE8A0":"rgba(245,232,208,.7)",
+                  border:modoDia===id?"1.5px solid rgba(255,232,120,.6)":"1px solid rgba(255,255,255,.15)"}}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between"}}>
             <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700}}>Dieta Diaria</h1>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -840,7 +907,7 @@ RESPONDA SOMENTE JSON VALIDO:
         {/* ══ CARDAPIO ══ */}
         {activeTab==="cardapio"&&(
           <div className="sl" style={{paddingTop:14,display:"flex",flexDirection:"column",gap:10}}>
-            {MEALS.map(meal=>{
+            {ACTIVE_MEALS.map(meal=>{
               const items=currentMenu.filter(i=>i.mealId===meal.id);const mcal=mealCals[meal.id];const open=expanded[meal.id];
               const mealCost=items.reduce((s,item)=>{
                 const qty=item.qty||1;
@@ -870,7 +937,7 @@ RESPONDA SOMENTE JSON VALIDO:
                     {/* Pie chart + cost for all meals with items */}
                     {items.length>0 && (
                       <div onClick={()=>setExpanded(p=>({...p,[meal.id]:!p[meal.id]}))} style={{cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                        <MealPieChart items={items} customFoodsList={customFoodsList}/>
+                        <MealPieChart items={items} customFoodsList={customFoodsList} customMacros={customMacros}/>
                         {mealCost>0&&<span style={{fontSize:10,fontWeight:700,color:"#286028",whiteSpace:"nowrap"}}>💰 {fmtPrice(mealCost)}</span>}
                       </div>
                     )}
@@ -926,7 +993,7 @@ RESPONDA SOMENTE JSON VALIDO:
                             )}
                           </div>
                         );})}
-                      {items.length>0 && <MacroTotalsRow items={items} customFoodsList={customFoodsList}/>}
+                      {items.length>0 && <MacroTotalsRow items={items} customFoodsList={customFoodsList} customMacros={customMacros}/>}
                     </div>
                   )}
                 </div>
@@ -961,7 +1028,7 @@ RESPONDA SOMENTE JSON VALIDO:
                   );
                 })()}
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px 12px"}}>
-                  {MEALS.map(m=>mealCals[m.id]>0&&(
+                  {ACTIVE_MEALS.map(m=>mealCals[m.id]>0&&(
                     <div key={m.id} style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"6px 10px"}}>
                       <p style={{fontSize:10,opacity:.6}}>{m.icon} {m.label}</p>
                       <p style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700}}>{mealCals[m.id]}</p>
@@ -971,7 +1038,10 @@ RESPONDA SOMENTE JSON VALIDO:
                 </div>
               </div>
             )}
-            {currentMenu.length>0&&<NutrientAnalysis menu={currentMenu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+currentProfile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")} customFoodsList={customFoodsList}/>}
+            {currentMenu.length>0&&<NutrientAnalysis menu={currentMenu} dailyGoal={dailyGoal} totalCal={totalCal} weight={+currentProfile.weight||0} onGoToAlimentos={()=>setActiveTab("alimentos")} customFoodsList={customFoodsList} customMacros={customMacros}/>}
+            {modoDia==="treino"&&currentMenu.length>0&&(
+              <TreinoAnalysis menu={currentMenu} weight={+currentProfile.weight||70} customFoodsList={customFoodsList} customMacros={customMacros}/>
+            )}
           </div>
         )}
 
@@ -994,8 +1064,8 @@ RESPONDA SOMENTE JSON VALIDO:
             )}
             <div className="card" style={{padding:"12px 14px",marginBottom:12}}>
               <p style={{fontSize:11,fontWeight:700,color:"#8B7050",letterSpacing:".1em",textTransform:"uppercase",marginBottom:8}}>Adicionar a refeicao:</p>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{MEALS.map(m=>(<button key={m.id} className={`pill ${targetMeal===m.id?"on":""}`} onClick={()=>setTargetMeal(m.id)}>{m.icon} {m.label}</button>))}</div>
-              {MEALS.find(m=>m.id===targetMeal)?.cooked&&(<div style={{marginTop:10,background:"#FFF8EC",border:"1px solid #E8C07D",borderRadius:8,padding:"7px 12px",display:"flex",gap:8}}><span>ℹ️</span><p style={{fontSize:12,color:"#7A4A00"}}>Calorias calculadas com valores do alimento <strong>cozido</strong> para esta refeicao.</p></div>)}
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{ACTIVE_MEALS.map(m=>(<button key={m.id} className={`pill ${targetMeal===m.id?"on":""} ${m.isTreino?"treino-pill":""}`} onClick={()=>setTargetMeal(m.id)} style={m.isTreino?{background:targetMeal===m.id?"#2A3F60":"#E8F0FD",color:targetMeal===m.id?"#FFE8A0":"#2A3F60",borderColor:"#2A3F60"}:{}}>{m.icon} {m.label}</button>))}</div>
+              {ACTIVE_MEALS.find(m=>m.id===targetMeal)?.cooked&&(<div style={{marginTop:10,background:"#FFF8EC",border:"1px solid #E8C07D",borderRadius:8,padding:"7px 12px",display:"flex",gap:8}}><span>ℹ️</span><p style={{fontSize:12,color:"#7A4A00"}}>Calorias calculadas com valores do alimento <strong>cozido</strong> para esta refeicao.</p></div>)}
             </div>
             <input className="inp" placeholder="Buscar alimento..." value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:10}}/>
             <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:8}}>
@@ -1054,7 +1124,7 @@ RESPONDA SOMENTE JSON VALIDO:
                         const cal=Math.round(cf.calPer100*m.g/100);
                         return(
                           <button key={mi} className="btn" onClick={()=>{
-                            const meal=MEALS.find(ml=>ml.id===targetMeal);
+                            const meal=ACTIVE_MEALS.find(ml=>ml.id===targetMeal);
                             setCurrentMenu(prev=>[...prev,{
                               id:Date.now(), mealId:targetMeal, foodId:null, name:cf.name,
                               measure:`${m.label} (${m.g}g)`, grams:m.g, cal, color:"#B8B8B8",
@@ -1074,28 +1144,52 @@ RESPONDA SOMENTE JSON VALIDO:
             )}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {filtered.map(food=>{
-                const isCook=MEALS.find(m=>m.id===targetMeal)?.cooked;const changed=food.rawCal!==food.cookedCal;
+                const isCook=MEALS.find(m=>m.id===targetMeal)?.cooked;
+                const changed=food.rawCal!==food.cookedCal;
+                const effCal = getEffectiveCal(food, isCook, customMacros);
+                const effMacro = getEffectiveMacroForFood(food, customMacros);
+                const macroEdited = !!(customMacros&&customMacros[food.id]);
                 return(
-                  <div key={food.id} className="card" style={{padding:"13px 14px"}}>
+                  <div key={food.id} className="card" style={{padding:"13px 14px",border:macroEdited?"1.5px solid #C97B5A33":"1px solid #E8E0D0"}}>
                     <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:10}}>
                       <div style={{width:38,height:38,borderRadius:9,background:food.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{GROUP_ICONS[food.group]||"🍴"}</div>
                       <div style={{flex:1}}>
                         <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
                           <span style={{fontWeight:700,fontSize:14}}>{food.name}</span>
+                          {macroEdited&&<span style={{fontSize:9,background:"#FDECEA",color:"#C0392B",padding:"1px 6px",borderRadius:8,fontWeight:700}}>editado</span>}
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                          <p style={{fontSize:12,color:"#8B7050"}}><strong style={{color:"#5C3018"}}>{isCook?food.cookedCal:food.rawCal} kcal</strong>/100g{isCook&&changed&&<span style={{color:"#A89878",fontSize:11}}> · cru: {food.rawCal} kcal</span>}</p>
+                          <p style={{fontSize:12,color:"#8B7050"}}>
+                            <strong style={{color:macroEdited?"#C0392B":"#5C3018"}}>{effCal} kcal</strong>/100g
+                            {isCook&&changed&&!macroEdited&&<span style={{color:"#A89878",fontSize:11}}> · cru: {food.rawCal} kcal</span>}
+                            {macroEdited&&<span style={{color:"#A89878",fontSize:11}}> · original: {isCook?food.cookedCal:food.rawCal} kcal</span>}
+                          </p>
                           {food.price>0&&<span style={{fontSize:11,color:"#286028",fontWeight:700,background:"#E8F5EC",padding:"1px 7px",borderRadius:10}}>💰 {fmtPrice(getEffectivePrice(food,customPrices))}/100g</span>}
                         </div>
-                        {food.priceDesc&&<p style={{fontSize:9,color:"#A89878",marginTop:1}}>📍 {food.priceDesc.split("/").slice(1).join(" · ")}</p>}
+                        {macroEdited&&(
+                          <p style={{fontSize:9,color:"#C97B5A",marginTop:2}}>P:{effMacro.p}g · C:{effMacro.c}g · G:{effMacro.f}g</p>
+                        )}
+                        {food.priceDesc&&!macroEdited&&<p style={{fontSize:9,color:"#A89878",marginTop:1}}>📍 {food.priceDesc.split("/").slice(1).join(" · ")}</p>}
                       </div>
+                      {/* Quick edit button */}
+                      <button className="btn" onClick={()=>setQuickEditFood({
+                          food,
+                          cal: customMacros?.[food.id]?.cal!=null ? String(customMacros[food.id].cal) : "",
+                          p:   customMacros?.[food.id]?.p!=null  ? String(customMacros[food.id].p)  : "",
+                          c:   customMacros?.[food.id]?.c!=null  ? String(customMacros[food.id].c)  : "",
+                          f:   customMacros?.[food.id]?.f!=null  ? String(customMacros[food.id].f)  : "",
+                        })}
+                        style={{background:macroEdited?"#FDECEA":"#EDE5D8",color:macroEdited?"#C0392B":"#5C3018",borderRadius:8,padding:"4px 8px",fontSize:11,fontWeight:600,flexShrink:0,alignSelf:"flex-start"}}>
+                        {macroEdited?"✎":"✎"}
+                      </button>
                     </div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                       {food.measures.map((m,i)=>{
                         const p=calcPrice(food,m.g,customPrices);
+                        const cal=calcCal(food,m.g,isCook,customMacros);
                         return(<button key={i} className="btn" onClick={()=>setAddModal({food,measure:m})} style={{background:food.color+"2A",border:`1.5px solid ${food.color}88`,padding:"6px 11px",fontSize:12,borderRadius:20,fontWeight:600,color:"#2A2420"}}>
                           + {m.label}
-                          <span style={{opacity:.65}}> · {calcCal(food,m.g,isCook)} kcal</span>
+                          <span style={{opacity:.65}}> · {cal} kcal</span>
                           {p!==null&&<span style={{color:"#286028",fontWeight:700,opacity:.85}}> · {fmtPrice(p)}</span>}
                         </button>);
                       })}
@@ -1345,7 +1439,7 @@ RESPONDA SOMENTE JSON VALIDO:
         )}
 
         {/* ══ PRECOS ══ */}
-        {activeTab==="precos"&&<PrecosTab customPrices={customPrices} setCustomPrices={setCustomPrices} customFoodsList={customFoodsList} setCustomFoodsList={setCustomFoodsList}/>}
+        {activeTab==="precos"&&<PrecosTab customPrices={customPrices} setCustomPrices={setCustomPrices} customMacros={customMacros} setCustomMacros={setCustomMacros} customFoodsList={customFoodsList} setCustomFoodsList={setCustomFoodsList}/>}
 
         {/* ══ RECEITAS ══ */}
         {activeTab==="receitas"&&<ReceitasTab setActiveTab={setActiveTab} setTargetMeal={setTargetMeal} addItem={addItem} MEALS_REF={MEALS}/>}
@@ -1356,7 +1450,7 @@ RESPONDA SOMENTE JSON VALIDO:
             menu={currentMenu} history={history} dailyGoal={dailyGoal}
             profile={currentProfile} weight={+currentProfile.weight||0}
             saveDay={saveDay} todayKey={todayKey}
-            customFoodsList={customFoodsList}
+            customFoodsList={customFoodsList} customMacros={customMacros}
           />
         )}
 
@@ -1380,15 +1474,49 @@ RESPONDA SOMENTE JSON VALIDO:
                 {ACTIVITY_LEVELS.map(a=><option key={a.id} value={a.id}>{a.label} - {a.desc}</option>)}
               </select>
             </div>
-            {bmr&&(
+            {(bmr||currentBmrManual)&&(
               <div className="card" style={{padding:"16px"}}>
                 <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:12}}>Seu Metabolismo</p>
-                <div className="stat-row"><span style={{fontSize:13,color:"#5C4020"}}>🔥 TMB (repouso total)</span><span><span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>{bmr}</span><span style={{fontSize:11,color:"#8B7050",marginLeft:3}}>kcal/dia</span></span></div>
+
+                {/* TMB row with edit */}
+                <div className="stat-row" style={{alignItems:"flex-start",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
+                    <span style={{fontSize:13,color:"#5C4020"}}>🔥 TMB (repouso total)</span>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,color:currentBmrManual?"#8B5E3C":"#2C1A0E"}}>{effectiveBmr}</span>
+                      <span style={{fontSize:11,color:"#8B7050"}}>kcal/dia</span>
+                      {currentBmrManual&&<span style={{fontSize:9,background:"#FFF3CD",color:"#856404",padding:"1px 6px",borderRadius:8,fontWeight:700}}>manual</span>}
+                    </div>
+                  </div>
+                  {bmr&&currentBmrManual&&(
+                    <p style={{fontSize:11,color:"#A89878"}}>Calculado pela fórmula: {bmr} kcal/dia</p>
+                  )}
+                  {/* Inline BMR editor */}
+                  <div style={{width:"100%",background:"#F5EFE6",borderRadius:10,padding:"10px 12px"}}>
+                    <p style={{fontSize:11,fontWeight:700,color:"#5C3018",marginBottom:6}}>
+                      Editar TMB de repouso <span style={{fontWeight:400,color:"#8B7050"}}>— útil se você tem medição por bioimpedância ou calorimetria indireta</span>
+                    </p>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <input className="inp" type="number" min="800" max="5000"
+                        placeholder={`Fórmula: ${bmr||"preencha os dados acima"} kcal`}
+                        value={currentBmrManual??""} onChange={e=>setCurrentBmrManual(e.target.value?+e.target.value:null)}
+                        style={{flex:1,padding:"8px 12px",fontSize:14}}/>
+                      <span style={{fontSize:12,color:"#8B7050",flexShrink:0}}>kcal/dia</span>
+                      {currentBmrManual&&(
+                        <button className="btn" onClick={()=>setCurrentBmrManual(null)}
+                          style={{background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:600,flexShrink:0}}>
+                          ↩ Usar fórmula
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="stat-row"><span style={{fontSize:13,color:"#5C4020"}}>⚡ TDEE (com atividade)</span><span><span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>{tdee}</span><span style={{fontSize:11,color:"#8B7050",marginLeft:3}}>kcal/dia</span></span></div>
                 <div className="stat-row" style={{borderBottom:"none"}}><span style={{fontSize:13,color:"#5C4020"}}>🎯 Meta atual</span><span><span style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,color:"#8B5E3C"}}>{dailyGoal}</span><span style={{fontSize:11,color:"#8B7050",marginLeft:3}}>kcal/dia</span></span></div>
               </div>
             )}
-            {bmr&&(
+            {(bmr||currentBmrManual)&&(
               <div className="card" style={{padding:"16px"}}>
                 <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:12}}>Objetivo Calorico</p>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -1403,7 +1531,7 @@ RESPONDA SOMENTE JSON VALIDO:
                 <input className="inp" type="number" min="800" max="5000" placeholder={`Ex: ${derivedGoal}`} value={currentGoalManual??""} onChange={e=>setCurrentGoalManual(e.target.value?+e.target.value:null)}/>
               </div>
             )}
-            {!bmr&&<div style={{textAlign:"center",padding:"32px 20px"}}><div style={{fontSize:48,marginBottom:12}}>🧮</div><p style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#8B7050",marginBottom:6}}>Preencha seus dados acima</p><p style={{fontSize:13,color:"#A89878"}}>Calcularemos sua TMB, TDEE e meta ideal.</p></div>}
+            {!bmr&&!currentBmrManual&&<div style={{textAlign:"center",padding:"32px 20px"}}><div style={{fontSize:48,marginBottom:12}}>🧮</div><p style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#8B7050",marginBottom:6}}>Preencha seus dados acima</p><p style={{fontSize:13,color:"#A89878"}}>Calcularemos sua TMB, TDEE e meta ideal.</p></div>}
           </div>
         )}
 
@@ -1427,7 +1555,7 @@ RESPONDA SOMENTE JSON VALIDO:
               <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>Backup</p>
               <p style={{fontSize:13,color:"#8B7050",marginBottom:14}}>Salve e restaure cardapio, perfil e metas.</p>
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                <button className="btn action-btn" onClick={()=>exportJSON(currentMenu,currentProfile,dailyGoal,customPrices)}><span style={{fontSize:28}}>💾</span><div><p style={{fontWeight:700,fontSize:14}}>Exportar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>{menu.length} itens</p></div></button>
+                <button className="btn action-btn" onClick={()=>exportJSON(currentMenu,currentProfile,dailyGoal,customPrices,customMacros)}><span style={{fontSize:28}}>💾</span><div><p style={{fontWeight:700,fontSize:14}}>Exportar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>{menu.length} itens</p></div></button>
                 <button className="btn action-btn" onClick={()=>fileRef.current.click()}><span style={{fontSize:28}}>📂</span><div><p style={{fontWeight:700,fontSize:14}}>Importar backup (.json)</p><p style={{fontSize:12,color:"#8B7050"}}>Restaura cardapio e perfil</p></div></button>
                 <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
               </div>
@@ -1603,7 +1731,7 @@ RESPONDA SOMENTE JSON VALIDO:
               <>
                 <label className="lbl">Adicionar a qual refeição</label>
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
-                  {MEALS.map(m=>(
+                  {ACTIVE_MEALS.map(m=>(
                     <button key={m.id} className="btn" onClick={()=>setCustomFood(p=>({...p,mealId:m.id}))}
                       style={{display:"flex",alignItems:"center",gap:10,background:customFood.mealId===m.id?"#FFF8F0":"#F2EDE4",borderRadius:10,padding:"9px 14px",border:`1.5px solid ${customFood.mealId===m.id?"#8B5E3C":"transparent"}`}}>
                       <span style={{fontSize:18}}>{m.icon}</span>
@@ -1627,18 +1755,89 @@ RESPONDA SOMENTE JSON VALIDO:
         </div>
       )}
 
+      {/* MODAL edicao rapida de macro/cal */}
+      {quickEditFood&&(
+        <div className="overlay" onClick={()=>setQuickEditFood(null)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+              <div style={{width:40,height:40,borderRadius:10,background:quickEditFood.food.color+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                {GROUP_ICONS[quickEditFood.food.group]||"🍴"}
+              </div>
+              <div>
+                <p style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>{quickEditFood.food.name}</p>
+                <p style={{fontSize:11,color:"#8B7050"}}>Editar kcal e macros por 100g</p>
+              </div>
+            </div>
+
+            <p style={{fontSize:12,color:"#8B7050",marginBottom:10}}>
+              Valores originais: <strong>{quickEditFood.food.rawCal} kcal</strong> · P:{quickEditFood.food.macro?.p||0}g · C:{quickEditFood.food.macro?.c||0}g · G:{quickEditFood.food.macro?.f||0}g
+            </p>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
+              {[
+                {key:"cal",label:"Kcal/100g",color:"#5C3018",placeholder:String(quickEditFood.food.rawCal)},
+                {key:"p",  label:"Proteína g",color:"#C97B5A",placeholder:String(quickEditFood.food.macro?.p||0)},
+                {key:"c",  label:"Carboidrato g",color:"#C8A840",placeholder:String(quickEditFood.food.macro?.c||0)},
+                {key:"f",  label:"Gordura g",color:"#4A8050",placeholder:String(quickEditFood.food.macro?.f||0)},
+              ].map(({key,label,color,placeholder})=>(
+                <div key={key}>
+                  <p style={{fontSize:10,fontWeight:700,color,marginBottom:4}}>{label}</p>
+                  <input className="inp" type="number" min="0" max="9999" step="0.1"
+                    placeholder={placeholder}
+                    value={quickEditFood[key]}
+                    onChange={e=>setQuickEditFood(p=>({...p,[key]:e.target.value}))}
+                    style={{padding:"8px 8px",fontSize:13,width:"100%"}}/>
+                </div>
+              ))}
+            </div>
+
+            <p style={{fontSize:11,color:"#A89878",marginBottom:14}}>Deixe vazio para manter o valor original. Alterações aparecem imediatamente nos botões de porção abaixo.</p>
+
+            <button className="btn" onClick={()=>{
+              const {food,cal,p,c,f}=quickEditFood;
+              const ov={};
+              if(cal!=="") ov.cal=parseFloat(cal)||0;
+              if(p!=="")   ov.p=parseFloat(p)||0;
+              if(c!=="")   ov.c=parseFloat(c)||0;
+              if(f!=="")   ov.f=parseFloat(f)||0;
+              if(Object.keys(ov).length>0)
+                setCustomMacros(prev=>({...prev,[food.id]:{...(prev[food.id]||{}),...ov}}));
+              setQuickEditFood(null);
+              showToast(`${food.name} atualizado!`);
+            }} style={{width:"100%",background:"linear-gradient(135deg,#5C3018,#8B5E3C)",color:"#F5E8D0",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700}}>
+              ✓ Salvar
+            </button>
+
+            {customMacros?.[quickEditFood.food.id]&&(
+              <button className="btn" onClick={()=>{
+                setCustomMacros(prev=>{const n={...prev};delete n[quickEditFood.food.id];return n;});
+                setQuickEditFood(null);
+                showToast("Valores originais restaurados");
+              }} style={{width:"100%",background:"#FDECEA",color:"#C0392B",borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,marginTop:8}}>
+                ↩ Restaurar valores originais
+              </button>
+            )}
+
+            <button className="btn" onClick={()=>setQuickEditFood(null)}
+              style={{width:"100%",background:"#EDE5D8",borderRadius:12,padding:"11px",fontSize:13,fontWeight:600,color:"#5C4020",marginTop:8}}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {toast&&<div className="toast" style={{background:toast.type==="err"?"#C0392B":"#2C1A0E",color:"#F5E8D0"}}>{toast.type==="err"?"⚠️ ":"✓ "}{toast.msg}</div>}
     </div>
   );
 }
 
 // ── RelatórioTab ─────────────────────────────────────────────────────────────
-function calcNutrientsForMenu(menuItems, customFoodsList) {
+function calcNutrientsForMenu(menuItems, customFoodsList, customMacros) {
   let cal=0,p=0,c=0,f=0,fi=0,su=0,na=0,k=0,ch=0;
   menuItems.forEach(item => {
     const q = item.qty||1;
     cal += item.cal*q;
-    const m = resolveMacro(item, customFoodsList)||{};
+    const m = resolveMacro(item, customFoodsList, customMacros)||{};
     if(!m.p && !m.c && !m.f) return;
     const g = item.grams*q;
     p   += (m.p||0)*g/100;
@@ -1653,7 +1852,7 @@ function calcNutrientsForMenu(menuItems, customFoodsList) {
   return {cal:Math.round(cal),p:Math.round(p),c:Math.round(c),f:Math.round(f),fi:Math.round(fi),su:Math.round(su),na:Math.round(na),k:Math.round(k),ch:Math.round(ch)};
 }
 
-function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey, customFoodsList }) {
+function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, todayKey, customFoodsList, customMacros }) {
   const [subTab, setSubTab] = useState("calorias");
   const [sortCol, setSortCol] = useState(null);  // null | "name"|"cal"|"p"|"c"|"f"|"fi"|"su"|"ch"|"na"|"k"
   const [sortDir, setSortDir] = useState(1);     // 1=asc, -1=desc
@@ -1705,7 +1904,7 @@ function RelatórioTab({ menu, history, dailyGoal, profile, weight, saveDay, tod
   const todayIso = todayKey();
   const getMenuForDay = (iso) => iso===todayIso ? menu : (history[iso]?.menu||[]);
   const dayData = days.map(iso => ({
-    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso), customFoodsList),
+    iso, label:getDayLabel(iso), ...calcNutrientsForMenu(getMenuForDay(iso), customFoodsList, customMacros),
     isToday: iso===todayIso
   }));
 
@@ -2704,12 +2903,13 @@ function LixoTab({ menuLixo, setMenuLixo, customPrices, customFoodsList, dailyGo
 }
 
 // ── PrecosTab ─────────────────────────────────────────────────────────────────
-function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFoodsList }) {
-  const [search, setSearch]     = useState("");
-  const [selGroup, setSelGroup] = useState("Todos");
-  const [editId, setEditId]     = useState(null);
-  const [editVal, setEditVal]   = useState("");
-  const [saved, setSaved]       = useState({});
+function PrecosTab({ customPrices, setCustomPrices, customMacros, setCustomMacros, customFoodsList, setCustomFoodsList }) {
+  const [search, setSearch]       = useState("");
+  const [selGroup, setSelGroup]   = useState("Todos");
+  const [editId, setEditId]       = useState(null);
+  const [editVal, setEditVal]     = useState("");
+  const [editMacro, setEditMacro] = useState({cal:"",p:"",c:"",f:""});
+  const [saved, setSaved]         = useState({});
 
   // Merge FOODS + customFoodsList into one unified list for display
   // Custom foods use string ids like "custom_xxx", FOODS use numeric ids
@@ -2737,7 +2937,6 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
     .sort((a,b) => a.name.localeCompare(b.name, "pt-BR"));
 
   function getP(food) {
-    // For user-created foods, price lives in customFoodsList
     if(food.isUserCreated) {
       const cf = (customFoodsList||[]).find(x=>x.id===food.id);
       return cf?.price||0;
@@ -2746,19 +2945,65 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
     return food.price||0;
   }
 
+  function getCal(food) {
+    if(food.isUserCreated) return food.calPer100||0;
+    const ov = customMacros&&customMacros[food.id];
+    return ov?.cal!=null ? ov.cal : food.rawCal;
+  }
+
+  function getMacro(food) {
+    if(food.isUserCreated) return null;
+    const ov = customMacros&&customMacros[food.id];
+    const base = food.macro||{};
+    return {
+      p: ov?.p!=null?ov.p:base.p||0,
+      c: ov?.c!=null?ov.c:base.c||0,
+      f: ov?.f!=null?ov.f:base.f||0,
+    };
+  }
+
+  function openEditor(food) {
+    const p = getP(food);
+    setEditId(food.id);
+    setEditVal(p>0?String(p.toFixed(2)).replace(".",","):"");
+    if(!food.isUserCreated) {
+      const m = getMacro(food);
+      const cal = getCal(food);
+      setEditMacro({
+        cal: customMacros?.[food.id]?.cal!=null ? String(customMacros[food.id].cal) : "",
+        p:   customMacros?.[food.id]?.p!=null  ? String(customMacros[food.id].p)  : "",
+        c:   customMacros?.[food.id]?.c!=null  ? String(customMacros[food.id].c)  : "",
+        f:   customMacros?.[food.id]?.f!=null  ? String(customMacros[food.id].f)  : "",
+      });
+    }
+  }
+
   function savePrice(food) {
     const v = parseFloat(editVal.replace(",","."));
-    if(isNaN(v)||v<0) return;
-
-    if(food.isUserCreated) {
-      // Save price inside customFoodsList
-      setCustomFoodsList(prev=>prev.map(cf=>cf.id===food.id?{...cf,price:v}:cf));
-    } else {
-      setCustomPrices(prev=>({...prev,[food.id]:v}));
+    if(!isNaN(v)&&v>=0) {
+      if(food.isUserCreated) {
+        setCustomFoodsList(prev=>prev.map(cf=>cf.id===food.id?{...cf,price:v}:cf));
+      } else {
+        setCustomPrices(prev=>({...prev,[food.id]:v}));
+      }
+    }
+    // Save macro overrides for standard foods
+    if(!food.isUserCreated) {
+      const hasChanges = editMacro.cal||editMacro.p||editMacro.c||editMacro.f;
+      if(hasChanges) {
+        const ov = {};
+        if(editMacro.cal!=="") ov.cal = parseFloat(editMacro.cal)||0;
+        if(editMacro.p!=="")   ov.p   = parseFloat(editMacro.p)||0;
+        if(editMacro.c!=="")   ov.c   = parseFloat(editMacro.c)||0;
+        if(editMacro.f!=="")   ov.f   = parseFloat(editMacro.f)||0;
+        setCustomMacros(prev=>({...prev,[food.id]:{...(prev[food.id]||{}),...ov}}));
+      } else if(customMacros?.[food.id]) {
+        // No macro values entered — preserve existing if any
+      }
     }
     setSaved(prev=>({...prev,[food.id]:true}));
     setTimeout(()=>setSaved(prev=>({...prev,[food.id]:false})),1800);
-    setEditId(null); setEditVal("");
+    setEditId(null); setEditVal(""); setEditMacro({cal:"",p:"",c:"",f:""});
   }
 
   function resetPrice(food) {
@@ -2769,12 +3014,21 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
     }
   }
 
+  function resetMacro(food) {
+    setCustomMacros(prev=>{const n={...prev};delete n[food.id];return n;});
+  }
+
   function isPriceEdited(food) {
     if(food.isUserCreated) return ((customFoodsList||[]).find(x=>x.id===food.id)?.price||0)>0;
     return customPrices[food.id]!==undefined;
   }
 
-  const editedCount = Object.keys(customPrices).length +
+  function isMacroEdited(food) {
+    if(food.isUserCreated) return false;
+    return !!(customMacros&&customMacros[food.id]);
+  }
+
+  const editedCount = Object.keys(customPrices).length + Object.keys(customMacros||{}).length +
     (customFoodsList||[]).filter(cf=>(cf.price||0)>0).length;
 
   return (
@@ -2821,11 +3075,12 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
         {filtered.map(food=>{
           const p = getP(food);
           const isEdited = isPriceEdited(food);
+          const macroEdited = isMacroEdited(food);
           const isEditing = editId===food.id;
           const isSaved = saved[food.id];
           return (
             <div key={food.id} className="card" style={{padding:"0",overflow:"hidden",
-              border:food.isUserCreated?"1.5px solid #C8A07044":isEdited?"1.5px solid #90C97E":"1px solid #E8E0D0"}}>
+              border:food.isUserCreated?"1.5px solid #C8A07044":isEdited||macroEdited?"1.5px solid #90C97E":"1px solid #E8E0D0"}}>
               {/* Main row */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px 44px",gap:6,padding:"10px 10px",alignItems:"center"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
@@ -2837,7 +3092,8 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
                     <p style={{fontSize:9,color:"#A89878"}}>
                       {food.group}
                       {food.isUserCreated&&<span style={{color:"#C8A070",fontWeight:700}}> · personalizado</span>}
-                      {isEdited&&!food.isUserCreated&&<span style={{color:"#286028"}}> · editado</span>}
+                      {isEdited&&!food.isUserCreated&&<span style={{color:"#286028"}}> · preço edit.</span>}
+                      {macroEdited&&<span style={{color:"#C97B5A"}}> · macro edit.</span>}
                     </p>
                   </div>
                 </div>
@@ -2857,9 +3113,9 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
                   }
                 </div>
                 <div style={{display:"flex",justifyContent:"center"}}>
-                  <button className="btn" onClick={()=>{setEditId(isEditing?null:food.id);setEditVal(p>0?String(p.toFixed(2)).replace(".",","):"");}}
-                    style={{background:isEditing?"#8B5E3C":"#EDE5D8",color:isEditing?"#FFF":"#5C3018",borderRadius:7,padding:"4px 8px",fontSize:12}}>
-                    {isEditing?"✕":"✏️"}
+                  <button className="btn" onClick={()=>{ if(editId===food.id){setEditId(null);setEditVal("");setEditMacro({cal:"",p:"",c:"",f:""});} else openEditor(food); }}
+                    style={{background:editId===food.id?"#8B5E3C":"#EDE5D8",color:editId===food.id?"#FFF":"#5C3018",borderRadius:7,padding:"4px 8px",fontSize:12}}>
+                    {editId===food.id?"✕":"✏️"}
                   </button>
                 </div>
               </div>
@@ -2870,22 +3126,50 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
                   {food.isUserCreated&&(
                     <p style={{fontSize:11,color:"#C8A070",fontWeight:700}}>
                       ✏️ Alimento personalizado — {food.calPer100} kcal/100g
-                      {food.measures?.length>0&&` · ${food.measures.length} porção(ões) definida(s)`}
+                      {food.measures?.length>0&&` · ${food.measures.length} porção(ões)`}
                     </p>
                   )}
-                  <p style={{fontSize:11,color:"#8B7050",fontWeight:700}}>Preço por 100g (em reais)</p>
+
+                  {/* Preço */}
+                  <p style={{fontSize:11,color:"#8B7050",fontWeight:700}}>💰 Preço por 100g (R$)</p>
                   <div style={{display:"flex",gap:8,alignItems:"center"}}>
                     <span style={{fontSize:13,color:"#5C3018",fontWeight:700,flexShrink:0}}>R$</span>
                     <input className="inp" type="number" step="0.01" min="0" max="9999" placeholder="Ex: 4,99"
                       value={editVal} onChange={e=>setEditVal(e.target.value)}
-                      style={{flex:1,padding:"8px 12px",fontSize:14}}
+                      style={{flex:1,padding:"8px 10px",fontSize:13}}
                       onKeyDown={e=>e.key==="Enter"&&savePrice(food)}
                       autoFocus/>
-                    <button className="btn" onClick={()=>savePrice(food)}
-                      style={{background:"#286028",color:"#FFF",borderRadius:9,padding:"8px 16px",fontWeight:700,fontSize:13,flexShrink:0}}>
-                      Salvar
-                    </button>
                   </div>
+
+                  {/* Calorias e Macros — só para alimentos padrão */}
+                  {!food.isUserCreated&&(
+                    <>
+                      <p style={{fontSize:11,color:"#8B7050",fontWeight:700,marginTop:4}}>🔥 Calorias e Macros por 100g <span style={{fontWeight:400}}>(deixe vazio para manter o padrão)</span></p>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                        {[
+                          {key:"cal",label:"Kcal",color:"#5C3018",placeholder:String(food.rawCal)},
+                          {key:"p",  label:"Prot (g)",color:"#C97B5A",placeholder:String(food.macro?.p||0)},
+                          {key:"c",  label:"Carb (g)",color:"#C8A840",placeholder:String(food.macro?.c||0)},
+                          {key:"f",  label:"Gord (g)",color:"#4A8050",placeholder:String(food.macro?.f||0)},
+                        ].map(({key,label,color,placeholder})=>(
+                          <div key={key}>
+                            <p style={{fontSize:9,fontWeight:700,color,marginBottom:3}}>{label}</p>
+                            <input className="inp" type="number" min="0" max="9999" step="0.1"
+                              placeholder={placeholder}
+                              value={editMacro[key]}
+                              onChange={e=>setEditMacro(m=>({...m,[key]:e.target.value}))}
+                              style={{padding:"6px 8px",fontSize:12,width:"100%"}}/>
+                          </div>
+                        ))}
+                      </div>
+                      {isMacroEdited(food)&&(
+                        <div style={{background:"#FFF8EC",border:"1px solid #E8C07D",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#7A4A00"}}>
+                          ✏️ Valores atuais editados: {customMacros[food.id].cal!=null?`${customMacros[food.id].cal} kcal`:""} {customMacros[food.id].p!=null?`P:${customMacros[food.id].p}g`:""} {customMacros[food.id].c!=null?`C:${customMacros[food.id].c}g`:""} {customMacros[food.id].f!=null?`G:${customMacros[food.id].f}g`:""}
+                        </div>
+                      )}
+                    </>
+                  )}
+
                   {/* Portion preview */}
                   {editVal&&!isNaN(parseFloat(editVal.replace(",",".")))&&(()=>{
                     const measures = food.isUserCreated
@@ -2893,7 +3177,7 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
                       : (FOODS.find(f=>f.id===food.id)?.measures||[]);
                     return measures.length>0&&(
                       <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                        {measures.map((m,i)=>{
+                        {measures.slice(0,3).map((m,i)=>{
                           const v=parseFloat(editVal.replace(",","."));
                           const pc=v*m.g/100;
                           return(
@@ -2905,12 +3189,26 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
                       </div>
                     );
                   })()}
-                  {(isEdited||food.isUserCreated&&p>0)&&(
-                    <button className="btn" onClick={()=>{resetPrice(food);setEditId(null);}}
-                      style={{background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px",fontSize:11,fontWeight:600}}>
-                      ↩ Remover preço
-                    </button>
-                  )}
+
+                  <button className="btn" onClick={()=>savePrice(food)}
+                    style={{background:"#286028",color:"#FFF",borderRadius:9,padding:"8px",fontWeight:700,fontSize:13}}>
+                    ✓ Salvar alterações
+                  </button>
+
+                  <div style={{display:"flex",gap:6}}>
+                    {(isPriceEdited(food))&&(
+                      <button className="btn" onClick={()=>{resetPrice(food);setEditId(null);}}
+                        style={{flex:1,background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px",fontSize:11,fontWeight:600}}>
+                        ↩ Restaurar preço
+                      </button>
+                    )}
+                    {isMacroEdited(food)&&(
+                      <button className="btn" onClick={()=>{resetMacro(food);setEditId(null);}}
+                        style={{flex:1,background:"#FDECEA",color:"#C0392B",borderRadius:8,padding:"6px",fontSize:11,fontWeight:600}}>
+                        ↩ Restaurar macros/kcal
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2922,10 +3220,11 @@ function PrecosTab({ customPrices, setCustomPrices, customFoodsList, setCustomFo
       {editedCount>0&&(
         <button className="btn" onClick={()=>{
           setCustomPrices({});
+          setCustomMacros({});
           setCustomFoodsList(prev=>prev.map(cf=>({...cf,price:0})));
         }}
           style={{background:"#FDECEA",color:"#C0392B",borderRadius:10,padding:"11px",fontSize:13,fontWeight:600,border:"1px solid #F4CCCC"}}>
-          ↩ Restaurar todos os preços originais ({editedCount} editado{editedCount>1?"s":""})
+          ↩ Restaurar todos os valores originais ({editedCount} editado{editedCount>1?"s":""})
         </button>
       )}
     </div>
@@ -3330,12 +3629,143 @@ function ReceitasTab({ setActiveTab, setTargetMeal, addItem, MEALS_REF }) {
   );
 }
 
+// ── TreinoAnalysis ────────────────────────────────────────────────────────────
+function TreinoAnalysis({ menu, weight, customFoodsList, customMacros }) {
+  const w = weight||70;
+
+  function getMacroTotals(mealId) {
+    const items = menu.filter(i=>i.mealId===mealId);
+    let cal=0,p=0,c=0,f=0,fi=0;
+    items.forEach(item=>{
+      const q=item.qty||1;
+      cal+=item.cal*q;
+      const macro=resolveMacro(item,customFoodsList,customMacros);
+      if(!macro) return;
+      const g=item.grams*q;
+      p+=macro.p*g/100; c+=macro.c*g/100; f+=macro.f*g/100; fi+=(macro.fi||0)*g/100;
+    });
+    return {cal:Math.round(cal),p:Math.round(p),c:Math.round(c),f:Math.round(f),fi:Math.round(fi),count:items.length};
+  }
+
+  const pre  = getMacroTotals("pretreino");
+  const post = getMacroTotals("postreino");
+
+  // Pre-workout targets (consumed 60-90min before)
+  const preTargets = { calMin:200, calMax:400, pMin:15, pMax:30, cMin:Math.round(w*0.5), cMax:Math.round(w*1.5), fMax:15, fiMax:8 };
+  // Post-workout targets (consumed within 30-60min after)
+  const postTargets = { calMin:300, calMax:600, pMin:20, pMax:40, cMin:Math.round(w*0.8), cMax:Math.round(w*1.5), fMax:15 };
+
+  function Check({ok,warn,label,detail}) {
+    const bg=ok?"#E8F5EC":warn?"#FFF8EC":"#FDECEA";
+    const color=ok?"#155724":warn?"#7A4A00":"#C0392B";
+    const icon=ok?"✅":warn?"⚠️":"❌";
+    return(
+      <div style={{background:bg,borderRadius:8,padding:"7px 10px",display:"flex",gap:8,alignItems:"flex-start"}}>
+        <span style={{flexShrink:0}}>{icon}</span>
+        <div>
+          <p style={{fontSize:12,fontWeight:700,color}}>{label}</p>
+          {detail&&<p style={{fontSize:11,color,opacity:.85,marginTop:1}}>{detail}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if(pre.count===0&&post.count===0) return null;
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10,margin:"8px 0"}}>
+      {/* PRÉ-TREINO */}
+      {pre.count>0&&(
+        <div style={{background:"linear-gradient(135deg,#1A2840,#2A3F60)",borderRadius:14,padding:"14px 16px",color:"#E8F0FD"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:24}}>💪</span>
+            <div>
+              <p style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700}}>Análise Pré-Treino</p>
+              <p style={{fontSize:11,opacity:.7}}>{pre.cal} kcal · P:{pre.p}g · C:{pre.c}g · G:{pre.f}g · Fibras:{pre.fi}g</p>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <Check
+              ok={pre.cal>=preTargets.calMin&&pre.cal<=preTargets.calMax}
+              warn={pre.cal<preTargets.calMin}
+              label={`Calorias: ${pre.cal} kcal (ideal 200–400 kcal)`}
+              detail={pre.cal<preTargets.calMin?"Pouco combustível para o treino — adicione carbo ou proteína"
+                :pre.cal>preTargets.calMax?"Refeição pesada — pode causar desconforto durante o treino":null}
+            />
+            <Check
+              ok={pre.p>=preTargets.pMin&&pre.p<=preTargets.pMax}
+              warn={pre.p<preTargets.pMin}
+              label={`Proteína: ${pre.p}g (ideal 15–30g)`}
+              detail={pre.p<preTargets.pMin?"Adicione iogurte, ovo ou whey para proteger o músculo durante o esforço":null}
+            />
+            <Check
+              ok={pre.c>=preTargets.cMin&&pre.c<=preTargets.cMax}
+              warn={pre.c<preTargets.cMin}
+              label={`Carboidrato: ${pre.c}g (ideal ${preTargets.cMin}–${preTargets.cMax}g para ${w}kg)`}
+              detail={pre.c<preTargets.cMin?"Carbo insuficiente — inclua banana, aveia, tapioca ou granola para energia"
+                :pre.c>preTargets.cMax?"Excesso de carbo pode causar lentidão no treino":null}
+            />
+            <Check
+              ok={pre.f<=preTargets.fMax&&pre.fi<=preTargets.fiMax}
+              warn={false}
+              label={`Gordura: ${pre.f}g · Fibras: ${pre.fi}g (manter baixo antes do treino)`}
+              detail={pre.f>preTargets.fMax||pre.fi>preTargets.fiMax?"Alta gordura/fibra retarda digestão e pode causar desconforto gastrointestinal durante o treino":null}
+            />
+          </div>
+          <p style={{fontSize:10,opacity:.5,marginTop:8}}>⏱️ Consumir 60–90 min antes do treino · Basedo no peso corporal de {w}kg</p>
+        </div>
+      )}
+
+      {/* PÓS-TREINO */}
+      {post.count>0&&(
+        <div style={{background:"linear-gradient(135deg,#1A3020,#2A5038)",borderRadius:14,padding:"14px 16px",color:"#E8F5ED"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:24}}>🥛</span>
+            <div>
+              <p style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700}}>Análise Pós-Treino</p>
+              <p style={{fontSize:11,opacity:.7}}>{post.cal} kcal · P:{post.p}g · C:{post.c}g · G:{post.f}g</p>
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <Check
+              ok={post.p>=postTargets.pMin&&post.p<=postTargets.pMax}
+              warn={post.p<postTargets.pMin}
+              label={`Proteína: ${post.p}g (ideal 20–40g para recuperação muscular)`}
+              detail={post.p<postTargets.pMin?"⚠️ Proteína insuficiente para síntese muscular — adicione whey, frango, atum ou ovo"
+                :post.p>postTargets.pMax?"Excesso de proteína não traz benefício extra — o corpo utiliza no máximo 40g de uma vez":null}
+            />
+            <Check
+              ok={post.c>=postTargets.cMin&&post.c<=postTargets.cMax}
+              warn={post.c<postTargets.cMin}
+              label={`Carboidrato: ${post.c}g (ideal ${postTargets.cMin}–${postTargets.cMax}g para repor glicogênio)`}
+              detail={post.c<postTargets.cMin?"Glicogênio muscular não reposto — adicione arroz, batata doce, fruta ou aveia"
+                :null}
+            />
+            <Check
+              ok={post.cal>=postTargets.calMin}
+              warn={post.cal<postTargets.calMin}
+              label={`Calorias: ${post.cal} kcal (ideal 300–600 kcal pós-treino)`}
+              detail={post.cal<postTargets.calMin?"Refeição muito pequena para recuperação — o corpo precisa de energia para reconstruir o músculo":null}
+            />
+            {post.f>postTargets.fMax&&(
+              <Check ok={false} warn={false}
+                label={`Gordura: ${post.f}g — pode retardar absorção de proteína/carbo`}
+                detail="Mantenha gordura abaixo de 15g no pós-treino para absorção mais rápida dos nutrientes"/>
+            )}
+          </div>
+          <p style={{fontSize:10,opacity:.5,marginTop:8}}>⚡ Consumir dentro de 30–60 min após o treino · A janela anabólica é real mas não é tão urgente quanto se acreditava</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MacroTotalsRow ────────────────────────────────────────────────────────────
-function MacroTotalsRow({ items, customFoodsList }) {
+function MacroTotalsRow({ items, customFoodsList, customMacros }) {
   let tP=0,tC=0,tF=0,tCalCustom=0;
   items.forEach(it=>{
     const q=it.qty||1;
-    const macro=resolveMacro(it,customFoodsList);
+    const macro=resolveMacro(it,customFoodsList,customMacros);
     if(!macro){ if(it.isCustom) tCalCustom+=it.cal*q; return; }
     tP+=macro.p*it.grams/100*q;
     tC+=macro.c*it.grams/100*q;
@@ -3453,11 +3883,11 @@ function SubstituicoesContent({ subTarget, subResults, subMode, setSubMode, subS
 }
 
 // ── Meal Macro Pie Chart ──────────────────────────────────────────────────────
-function MealPieChart({ items, customFoodsList }) {
+function MealPieChart({ items, customFoodsList, customMacros }) {
   let totP=0, totC=0, totF=0, totCalCustom=0;
   items.forEach(item=>{
     const q=item.qty||1;
-    const macro=resolveMacro(item,customFoodsList);
+    const macro=resolveMacro(item,customFoodsList,customMacros);
     if(!macro){ if(item.isCustom) totCalCustom+=item.cal*q; return; }
     const g=item.grams;
     totP += macro.p * g/100 * q;
@@ -3509,13 +3939,13 @@ function MealPieChart({ items, customFoodsList }) {
 }
 
 // ── Nutrient Analysis Component ───────────────────────────────────────────────
-function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos, customFoodsList }) {
+function NutrientAnalysis({ menu, dailyGoal, totalCal, weight, onGoToAlimentos, customFoodsList, customMacros }) {
   const groupsPresent = new Set(menu.map(i => i.group));
 
   // Calculate total macros consumed
   let totalProteinG=0, totalCarbG=0, totalFatG=0;
   menu.forEach(item => {
-    const macro = resolveMacro(item, customFoodsList);
+    const macro = resolveMacro(item, customFoodsList, customMacros);
     if (!macro) return;
     const q = item.qty||1, g = item.grams;
     totalProteinG += macro.p * g/100 * q;
